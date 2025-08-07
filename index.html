@@ -60,6 +60,30 @@
                     </div>
                 </div>
 
+                <div class="sidebar-section" id="scaleSection">
+                    <h3>Scale</h3>
+                    <div class="form-group">
+                        <label class="form-label" for="unitsSelect">Units</label>
+                        <select id="unitsSelect" class="form-control">
+                            <option value="ft" selected>Feet (ft)</option>
+                            <option value="m">Meters (m)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="unitsPerPixel">Scale (units per pixel)</label>
+                        <input type="number" id="unitsPerPixel" class="form-control" step="0.0001" min="0" placeholder="e.g., 0.05 for 1 ft per 20 px">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="stepsPerUnit">Steps per unit</label>
+                        <input type="number" id="stepsPerUnit" class="form-control" step="0.0001" min="0" placeholder="e.g., 0.4 steps/ft">
+                    </div>
+                    <div class="btn-group">
+                        <button id="calibrateScale" class="btn btn--secondary" title="Click two points to calibrate">Calibrate by Click</button>
+                        <button id="resetScale" class="btn btn--outline">Reset Scale</button>
+                    </div>
+                    <div class="small text-muted" id="gridScaleInfo" style="margin-top:8px;"></div>
+                </div>
+
                 <div class="sidebar-section">
                     <h3>Analytics</h3>
                     <div class="analytics-panel" id="analyticsPanel">
@@ -68,15 +92,23 @@
                             <div class="metric-value" id="totalPaths">0</div>
                         </div>
                         <div class="metric">
-                            <div class="metric-label">Total Distance</div>
+                            <div class="metric-label">Total Distance (px)</div>
                             <div class="metric-value" id="totalDistance">0 px</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label" id="totalDistanceUnitsLabel">Total Distance (ft)</div>
+                            <div class="metric-value" id="totalDistanceUnits">0 ft</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Total Steps</div>
+                            <div class="metric-value" id="totalSteps">0</div>
                         </div>
                         <div class="metric">
                             <div class="metric-label">Weighted Cost</div>
                             <div class="metric-value" id="weightedCost">0</div>
                         </div>
                         <div class="metric">
-                            <div class="metric-label">Avg Path Length</div>
+                            <div class="metric-label">Avg Path Length (px)</div>
                             <div class="metric-value" id="avgPathLength">0 px</div>
                         </div>
                     </div>

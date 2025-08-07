@@ -56,6 +56,14 @@ class SpaghettiDiagramApp {
         this.updateAnalytics();
         this.render();
         
+        // Default scale settings
+        this.units = 'ft'; // 'ft' or 'm'
+        this.unitsPerPixel = 0; // real-world units per pixel (0 = undefined)
+        this.stepsPerUnit = 0; // steps per unit (e.g., 0.4 steps/ft)
+        this.isCalibrating = false;
+        this.calibrationPoints = [];
+        this.updateScaleUI();
+        
         // Set initial tool
         this.setTool('select');
     }
@@ -74,6 +82,18 @@ class SpaghettiDiagramApp {
         document.querySelectorAll('.tool-btn').forEach(btn => {
             btn.addEventListener('click', this.handleToolChange.bind(this));
         });
+        
+        // Scale controls
+        const unitsSelect = document.getElementById('unitsSelect');
+        const unitsPerPixelInput = document.getElementById('unitsPerPixel');
+        const stepsPerUnitInput = document.getElementById('stepsPerUnit');
+        const calibrateBtn = document.getElementById('calibrateScale');
+        const resetScaleBtn = document.getElementById('resetScale');
+        if (unitsSelect) unitsSelect.addEventListener('change', (e) => { this.units = e.target.value; this.updateScaleUI(); this.updateAnalytics(); this.render(); });
+        if (unitsPerPixelInput) unitsPerPixelInput.addEventListener('change', (e) => { this.unitsPerPixel = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); this.render(); });
+        if (stepsPerUnitInput) stepsPerUnitInput.addEventListener('change', (e) => { this.stepsPerUnit = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); });
+        if (calibrateBtn) calibrateBtn.addEventListener('click', () => this.beginCalibration());
+        if (resetScaleBtn) resetScaleBtn.addEventListener('click', () => this.resetScale());
         
         // File upload (image or PDF)
         document.getElementById('backgroundUpload').addEventListener('change', this.handleBackgroundUpload.bind(this));
@@ -346,6 +366,12 @@ class SpaghettiDiagramApp {
         this.mousePos = this.getMousePos(e);
         this.dragStart = { ...this.mousePos };
         
+        // Calibration click handling has priority
+        if (this.isCalibrating) {
+            this.handleCalibrationClick();
+            return;
+        }
+        
         if (this.currentTool === 'select') {
             this.handleSelectMouseDown();
         } else if (this.currentTool === 'path') {
@@ -450,6 +476,24 @@ class SpaghettiDiagramApp {
     handleMouseMove(e) {
         e.preventDefault();
         this.mousePos = this.getMousePos(e);
+        
+        if (this.isCalibrating) {
+            // show a temporary line between first point and current cursor
+            this.render();
+            if (this.calibrationPoints.length === 1) {
+                const p = this.calibrationPoints[0];
+                this.ctx.save();
+                this.ctx.strokeStyle = '#6c5ce7';
+                this.ctx.setLineDash([6, 4]);
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(p.x, p.y);
+                this.ctx.lineTo(this.mousePos.x, this.mousePos.y);
+                this.ctx.stroke();
+                this.ctx.restore();
+            }
+            return;
+        }
         
         if (this.currentTool === 'select') {
             this.handleSelectMouseMove();
@@ -951,6 +995,27 @@ class SpaghettiDiagramApp {
         // Draw grid
         this.drawGrid();
         
+        // Draw calibration points if calibrating
+        if (this.isCalibrating && this.calibrationPoints.length > 0) {
+            this.ctx.save();
+            this.ctx.fillStyle = '#6c5ce7';
+            this.ctx.strokeStyle = '#6c5ce7';
+            for (const p of this.calibrationPoints) {
+                this.ctx.beginPath();
+                this.ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+            if (this.calibrationPoints.length === 2) {
+                this.ctx.setLineDash([6,4]);
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(this.calibrationPoints[0].x, this.calibrationPoints[0].y);
+                this.ctx.lineTo(this.calibrationPoints[1].x, this.calibrationPoints[1].y);
+                this.ctx.stroke();
+            }
+            this.ctx.restore();
+        }
+        
         // Draw obstacles
         this.obstacles.forEach(obstacle => this.drawObstacle(obstacle));
         
@@ -1008,6 +1073,33 @@ class SpaghettiDiagramApp {
     }
     
     drawGrid() {
+        const gridSizePx = 20; // base pixel spacing
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = '#f0f0f0';
+        
+        for (let x = 0; x < this.canvas.width; x += gridSizePx) {
+            this.ctx.moveTo(x, 0);
+            this.ctx.lineTo(x, this.canvas.height);
+        }
+        
+        for (let y = 0; y < this.canvas.height; y += gridSizePx) {
+            this.ctx.moveTo(0, y);
+            this.ctx.lineTo(this.canvas.width, y);
+        }
+        
+        this.ctx.stroke();
+        
+        // Display grid scale info below grid (in UI element)
+        const gridInfoEl = document.getElementById('gridScaleInfo');
+        if (gridInfoEl) {
+            if (this.unitsPerPixel > 0) {
+                const unitsPerCell = this.unitsPerPixel * gridSizePx;
+                gridInfoEl.textContent = `Grid: ${unitsPerCell.toFixed(3)} ${this.units} per ${gridSizePx}px cell`;
+            } else {
+                gridInfoEl.textContent = 'Grid scale not set';
+            }
+        }
+    }
         const gridSize = 20;
         this.ctx.beginPath();
         this.ctx.strokeStyle = '#f0f0f0';
@@ -1166,6 +1258,37 @@ class SpaghettiDiagramApp {
         this.paths.forEach(path => this.updateObjectVisits(path));
 
         const totalPaths = this.paths.length;
+        const totalDistancePx = this.paths.reduce((sum, path) => sum + path.length, 0);
+        const weightedCost = this.paths.reduce((sum, path) => sum + (path.length * path.frequency), 0);
+        const avgPathLengthPx = totalPaths > 0 ? totalDistancePx / totalPaths : 0;
+
+        // Update existing px metrics
+        document.getElementById('totalPaths').textContent = totalPaths;
+        document.getElementById('totalDistance').textContent = `${Math.round(totalDistancePx)} px`;
+        document.getElementById('weightedCost').textContent = Math.round(weightedCost);
+        document.getElementById('avgPathLength').textContent = `${Math.round(avgPathLengthPx)} px`;
+
+        // New units + steps metrics
+        const unitsLabelEl = document.getElementById('totalDistanceUnitsLabel');
+        const unitsValEl = document.getElementById('totalDistanceUnits');
+        const stepsValEl = document.getElementById('totalSteps');
+        if (unitsLabelEl) unitsLabelEl.textContent = `Total Distance (${this.units})`;
+        if (this.unitsPerPixel > 0) {
+            const totalDistanceUnits = totalDistancePx * this.unitsPerPixel;
+            if (unitsValEl) unitsValEl.textContent = `${totalDistanceUnits.toFixed(2)} ${this.units}`;
+            if (stepsValEl) stepsValEl.textContent = `${(totalDistanceUnits * (this.stepsPerUnit || 0)).toFixed(0)}`;
+        } else {
+            if (unitsValEl) unitsValEl.textContent = `0 ${this.units}`;
+            if (stepsValEl) stepsValEl.textContent = '0';
+        }
+
+        this.updateHotspotList();
+    }
+        // Reset and recalculate object visits from scratch based on current paths
+        this.objects.forEach(obj => obj.visits = 0);
+        this.paths.forEach(path => this.updateObjectVisits(path));
+
+        const totalPaths = this.paths.length;
         const totalDistance = this.paths.reduce((sum, path) => sum + path.length, 0);
         const weightedCost = this.paths.reduce((sum, path) => sum + (path.length * path.frequency), 0);
         const avgPathLength = totalPaths > 0 ? totalDistance / totalPaths : 0;
@@ -1177,7 +1300,58 @@ class SpaghettiDiagramApp {
 
         this.updateHotspotList();
     }
+    
+    beginCalibration() {
+        this.isCalibrating = true;
+        this.calibrationPoints = [];
+        this.showInfoMessage('Calibration: click two points with a known real distance.', 'info');
+    }
 
+    handleCalibrationClick() {
+        this.calibrationPoints.push({ x: this.mousePos.x, y: this.mousePos.y });
+        if (this.calibrationPoints.length === 2) {
+            // Prompt for real distance
+            const distanceStr = prompt(`Enter real distance between points in ${this.units}:`, '10');
+            const realDistance = distanceStr ? parseFloat(distanceStr) : NaN;
+            if (!isNaN(realDistance) && realDistance > 0) {
+                const dx = this.calibrationPoints[1].x - this.calibrationPoints[0].x;
+                const dy = this.calibrationPoints[1].y - this.calibrationPoints[0].y;
+                const pxDist = Math.sqrt(dx*dx + dy*dy);
+                if (pxDist > 0) {
+                    this.unitsPerPixel = realDistance / pxDist; // units per pixel
+                    this.updateScaleUI();
+                    this.updateAnalytics();
+                    this.render();
+                    this.showInfoMessage(`Scale set: ${this.unitsPerPixel.toFixed(4)} ${this.units}/px`, 'success');
+                }
+            } else {
+                this.showInfoMessage('Calibration canceled or invalid distance.', 'warning');
+            }
+            this.isCalibrating = false;
+            this.calibrationPoints = [];
+        }
+    }
+
+    resetScale() {
+        this.units = this.units || 'ft';
+        this.unitsPerPixel = 0;
+        this.stepsPerUnit = 0;
+        this.isCalibrating = false;
+        this.calibrationPoints = [];
+        this.updateScaleUI();
+        this.updateAnalytics();
+        this.render();
+    }
+
+    updateScaleUI() {
+        const unitsSelect = document.getElementById('unitsSelect');
+        const unitsPerPixelInput = document.getElementById('unitsPerPixel');
+        const stepsPerUnitInput = document.getElementById('stepsPerUnit');
+        if (unitsSelect) unitsSelect.value = this.units;
+        if (unitsPerPixelInput) unitsPerPixelInput.value = this.unitsPerPixel || '';
+        if (stepsPerUnitInput) stepsPerUnitInput.value = this.stepsPerUnit || '';
+    }
+    
     updateHotspotList() {
         const hotspotList = document.getElementById('hotspotList');
         hotspotList.innerHTML = '';
