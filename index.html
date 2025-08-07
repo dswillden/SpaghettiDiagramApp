@@ -13,8 +13,15 @@
             <div class="header-content">
                 <h1>Spaghetti Diagram Tool</h1>
                 <div class="header-actions">
-                    <input type="file" id="imageUpload" accept="image/*" class="sr-only">
-                    <label for="imageUpload" class="btn btn--primary">Upload Workspace Image</label>
+                    <input type="file" id="backgroundUpload" accept="image/*,.pdf,application/pdf" class="sr-only">
+                    <label for="backgroundUpload" class="btn btn--primary">Upload Background (Image/PDF)</label>
+                    <div class="btn-group" aria-label="Background Orientation Controls">
+                        <button id="rotateLeft" class="btn btn--secondary" title="Rotate Left 90°">⟲</button>
+                        <button id="rotateRight" class="btn btn--secondary" title="Rotate Right 90°">⟳</button>
+                        <button id="flipH" class="btn btn--secondary" title="Flip Horizontal">⇆</button>
+                        <button id="flipV" class="btn btn--secondary" title="Flip Vertical">⇅</button>
+                        <button id="resetOrientation" class="btn btn--outline" title="Reset Orientation">Reset</button>
+                    </div>
                     <button id="clearAll" class="btn btn--secondary">Clear All</button>
                     <button id="exportData" class="btn btn--outline">Export Data</button>
                 </div>
@@ -169,6 +176,43 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
-</body>
-</html>
+    	<script>
+        (function(){
+          function loadScript(src){
+            return new Promise(function(resolve, reject){
+              var s = document.createElement('script');
+              s.src = src;
+              s.async = true;
+              s.onload = function(){ resolve(src); };
+              s.onerror = function(){ reject(new Error('Failed to load ' + src)); };
+              document.head.appendChild(s);
+            });
+          }
+          function setWorker(base){
+            if (!window.pdfjsLib) return;
+            var worker = base === 'local'
+              ? 'libs/pdfjs/pdf.worker.min.js'
+              : base + '/pdf.worker.min.js';
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
+          }
+          (async function(){
+            var tried = [];
+            var sources = [
+              {label: 'local', url: 'libs/pdfjs/pdf.min.js', base: 'local'},
+              {label: 'cdnjs', url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', base: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174'},
+              {label: 'unpkg', url: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js', base: 'https://unpkg.com/pdfjs-dist@3.11.174/build'},
+              {label: 'jsdelivr', url: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', base: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build'}
+            ];
+            for (var i=0;i<sources.length;i++){
+              var src = sources[i];
+              try{
+                await loadScript(src.url);
+                if (window.pdfjsLib){ setWorker(src.base); break; }
+              }catch(e){ tried.push(src.label); }
+            }
+            // Optional: expose which sources failed for debugging
+            window.__pdfjsTried = tried;
+          })();
+        })();
+      </script>
+      <script src="app.js"></script>

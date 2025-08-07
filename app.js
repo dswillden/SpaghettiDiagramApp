@@ -13,6 +13,8 @@ class SpaghettiDiagramApp {
         this.paths = [];
         this.obstacles = [];
         this.backgroundImage = null;
+        this.backgroundPdfPageCanvas = null; // offscreen canvas for rendered PDF page
+        this.backgroundTransform = { rotation: 0, flipH: false, flipV: false };
         this.selectedObject = null;
         this.currentPath = [];
         this.currentObstacle = null;
@@ -73,8 +75,15 @@ class SpaghettiDiagramApp {
             btn.addEventListener('click', this.handleToolChange.bind(this));
         });
         
-        // File upload
-        document.getElementById('imageUpload').addEventListener('change', this.handleImageUpload.bind(this));
+        // File upload (image or PDF)
+        document.getElementById('backgroundUpload').addEventListener('change', this.handleBackgroundUpload.bind(this));
+        
+        // Background orientation controls
+        document.getElementById('rotateLeft').addEventListener('click', () => this.rotateBackground(-90));
+        document.getElementById('rotateRight').addEventListener('click', () => this.rotateBackground(90));
+        document.getElementById('flipH').addEventListener('click', () => this.flipBackground('h'));
+        document.getElementById('flipV').addEventListener('click', () => this.flipBackground('v'));
+        document.getElementById('resetOrientation').addEventListener('click', () => this.resetBackgroundTransform());
         
         // Action buttons
         document.getElementById('clearAll').addEventListener('click', this.clearAll.bind(this));
@@ -238,37 +247,90 @@ class SpaghettiDiagramApp {
         this.render();
     }
     
-    handleImageUpload(e) {
+    async handleBackgroundUpload(e) {
         const file = e.target.files[0];
-        if (!file || !file.type.startsWith('image/')) {
-            alert('Please select a valid image file.');
-            return;
-        }
+        if (!file) return;
         
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                this.backgroundImage = img;
-                this.render();
-                
-                // Show success message
-                const info = document.getElementById('canvasInfo');
-                const originalText = info.textContent;
-                info.textContent = 'Background image loaded successfully!';
-                info.style.color = 'var(--color-success)';
-                
-                setTimeout(() => {
-                    info.textContent = originalText;
-                    info.style.color = '';
-                }, 2000);
+        // Reset existing background sources
+        this.backgroundImage = null;
+        this.backgroundPdfPageCanvas = null;
+        this.resetBackgroundTransform();
+        
+        const type = file.type || '';
+        try {
+            if (type.startsWith('image/')) {
+                await this.loadBackgroundImage(file);
+                this.showInfoMessage('Background image loaded successfully!', 'success');
+            } else if (type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                await this.loadBackgroundPdf(file);
+                this.showInfoMessage('Background PDF loaded (first page).', 'success');
+            } else {
+                alert('Please select an image or PDF file.');
+            }
+        } catch (err) {
+            console.error(err);
+            this.showInfoMessage(`Failed to load background: ${err && err.message ? err.message : err}`, 'error');
+        }
+    }
+
+    loadBackgroundImage(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const img = new Image();
+                img.onload = () => {
+                    this.backgroundImage = img;
+                    this.render();
+                    resolve();
+                };
+                img.onerror = () => reject(new Error('Image load error'));
+                img.src = ev.target.result;
             };
-            img.onerror = () => {
-                alert('Failed to load image. Please try a different file.');
+            reader.onerror = () => reject(new Error('File read error'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async loadBackgroundPdf(file) {
+        if (!window.pdfjsLib) throw new Error('PDF.js not loaded (CDN blocked or offline).');
+        const arrayBuffer = await file.arrayBuffer();
+        
+        // Show loading overlay for PDFs (rendering can take time)
+        this.setLoading(true, 'Rendering PDF...');
+        try {
+            // Ensure worker is configured
+            if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+                // Fallback to the same CDN worker if not set by HTML
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            }
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const page = await pdf.getPage(1);
+            
+            // Render page to an offscreen canvas at scale to fit our workspace
+            const viewport = page.getViewport({ scale: 1 });
+            // Determine scale to fit canvas while preserving aspect ratio
+            const scaleX = this.canvas.width / viewport.width;
+            const scaleY = this.canvas.height / viewport.height;
+            const scale = Math.min(scaleX, scaleY);
+            const scaledViewport = page.getViewport({ scale });
+            
+            const offscreen = document.createElement('canvas');
+            offscreen.width = Math.ceil(scaledViewport.width);
+            offscreen.height = Math.ceil(scaledViewport.height);
+            const offctx = offscreen.getContext('2d');
+            
+            const renderContext = {
+                canvasContext: offctx,
+                viewport: scaledViewport
             };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
+            await page.render(renderContext).promise;
+            this.backgroundPdfPageCanvas = offscreen;
+            this.render();
+        } catch (err) {
+            throw new Error(`PDF render failed: ${err && err.message ? err.message : err}`);
+        } finally {
+            this.setLoading(false);
+        }
     }
     
     getMousePos(e) {
@@ -880,9 +942,10 @@ class SpaghettiDiagramApp {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
-        // Draw background image if it exists
-        if (this.backgroundImage) {
-            this.ctx.drawImage(this.backgroundImage, 0, 0, this.canvas.width, this.canvas.height);
+        // Draw background (image or rendered PDF) with orientation transforms
+        const bgSource = this.backgroundPdfPageCanvas || this.backgroundImage;
+        if (bgSource) {
+            this.drawBackgroundWithTransform(bgSource);
         }
         
         // Draw grid
@@ -918,6 +981,32 @@ class SpaghettiDiagramApp {
         }
     }
 
+    drawBackgroundWithTransform(source) {
+        const { rotation, flipH, flipV } = this.backgroundTransform;
+        const cx = this.canvas.width / 2;
+        const cy = this.canvas.height / 2;
+        this.ctx.save();
+        this.ctx.translate(cx, cy);
+        this.ctx.rotate((rotation % 360) * Math.PI / 180);
+        this.ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+        
+        // Compute draw size maintaining aspect ratio to fit canvas
+        let dw = this.canvas.width;
+        let dh = this.canvas.height;
+        const imgAspect = source.width / source.height;
+        const canvasAspect = this.canvas.width / this.canvas.height;
+        if (imgAspect > canvasAspect) {
+            dw = this.canvas.width;
+            dh = dw / imgAspect;
+        } else {
+            dh = this.canvas.height;
+            dw = dh * imgAspect;
+        }
+        
+        this.ctx.drawImage(source, -dw / 2, -dh / 2, dw, dh);
+        this.ctx.restore();
+    }
+    
     drawGrid() {
         const gridSize = 20;
         this.ctx.beginPath();
@@ -1394,6 +1483,14 @@ class SpaghettiDiagramApp {
         }
     }
 
+    setLoading(isLoading, text = 'Processing...') {
+        const overlay = document.getElementById('loadingOverlay');
+        if (!overlay) return;
+        const textEl = overlay.querySelector('.loading-text');
+        if (textEl) textEl.textContent = text;
+        overlay.classList.toggle('hidden', !isLoading);
+    }
+
     showInfoMessage(message, type = 'info') {
         const info = document.getElementById('canvasInfo');
         const originalText = info.textContent;
@@ -1420,15 +1517,34 @@ class SpaghettiDiagramApp {
             info.style.color = originalColor;
         }, 3000);
     }
+    
+    rotateBackground(deltaDeg) {
+        this.backgroundTransform.rotation = (this.backgroundTransform.rotation + deltaDeg + 360) % 360;
+        this.render();
+    }
 
+    flipBackground(axis) {
+        if (axis === 'h') this.backgroundTransform.flipH = !this.backgroundTransform.flipH;
+        if (axis === 'v') this.backgroundTransform.flipV = !this.backgroundTransform.flipV;
+        this.render();
+    }
+
+    resetBackgroundTransform() {
+        this.backgroundTransform = { rotation: 0, flipH: false, flipV: false };
+        this.render();
+    }
+    
     clearAll() {
         if (confirm('Are you sure you want to clear everything? This action cannot be undone.')) {
             this.objects = [];
             this.paths = [];
             this.obstacles = [];
             this.backgroundImage = null;
+            this.backgroundPdfPageCanvas = null;
+            this.resetBackgroundTransform();
             this.selectedObject = null;
-            document.getElementById('imageUpload').value = '';
+            const uploadInput = document.getElementById('backgroundUpload');
+            if (uploadInput) uploadInput.value = '';
             this.updateAnalytics();
             this.render();
         }
