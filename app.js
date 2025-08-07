@@ -60,8 +60,10 @@ class SpaghettiDiagramApp {
         this.units = 'ft'; // 'ft' or 'm'
         this.unitsPerPixel = 0; // real-world units per pixel (0 = undefined)
         this.stepsPerUnit = 0; // steps per unit (e.g., 0.4 steps/ft)
+        this.gridCellUnits = 1; // default 1 unit per grid cell
         this.isCalibrating = false;
         this.calibrationPoints = [];
+        this.loadScaleFromStorage();
         this.updateScaleUI();
         
         // Set initial tool
@@ -87,13 +89,16 @@ class SpaghettiDiagramApp {
         const unitsSelect = document.getElementById('unitsSelect');
         const unitsPerPixelInput = document.getElementById('unitsPerPixel');
         const stepsPerUnitInput = document.getElementById('stepsPerUnit');
+        const gridCellUnitsInput = document.getElementById('gridCellUnits');
         const calibrateBtn = document.getElementById('calibrateScale');
         const resetScaleBtn = document.getElementById('resetScale');
-        if (unitsSelect) unitsSelect.addEventListener('change', (e) => { this.units = e.target.value; this.updateScaleUI(); this.updateAnalytics(); this.render(); });
-        if (unitsPerPixelInput) unitsPerPixelInput.addEventListener('change', (e) => { this.unitsPerPixel = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); this.render(); });
-        if (stepsPerUnitInput) stepsPerUnitInput.addEventListener('change', (e) => { this.stepsPerUnit = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); });
+        const persist = () => this.saveScaleToStorage();
+        if (unitsSelect) unitsSelect.addEventListener('change', (e) => { this.units = e.target.value; this.updateScaleUI(); this.updateAnalytics(); this.render(); persist(); });
+        if (unitsPerPixelInput) unitsPerPixelInput.addEventListener('change', (e) => { this.unitsPerPixel = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); this.render(); persist(); });
+        if (stepsPerUnitInput) stepsPerUnitInput.addEventListener('change', (e) => { this.stepsPerUnit = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); persist(); });
+        if (gridCellUnitsInput) gridCellUnitsInput.addEventListener('change', (e) => { this.gridCellUnits = Math.max(0.01, parseFloat(e.target.value) || 1); this.render(); persist(); });
         if (calibrateBtn) calibrateBtn.addEventListener('click', () => this.beginCalibration());
-        if (resetScaleBtn) resetScaleBtn.addEventListener('click', () => this.resetScale());
+        if (resetScaleBtn) resetScaleBtn.addEventListener('click', () => { this.resetScale(); persist(); });
         
         // File upload (image or PDF)
         document.getElementById('backgroundUpload').addEventListener('change', this.handleBackgroundUpload.bind(this));
@@ -1073,7 +1078,13 @@ class SpaghettiDiagramApp {
     }
     
     drawGrid() {
-        const gridSizePx = 20; // base pixel spacing
+        // Determine pixel spacing from real unit per cell if scale is set
+        let gridSizePx = 20;
+        if (this.unitsPerPixel > 0 && this.gridCellUnits > 0) {
+            gridSizePx = this.gridCellUnits / this.unitsPerPixel;
+            // Clamp to reasonable pixel sizes
+            gridSizePx = Math.max(8, Math.min(200, gridSizePx));
+        }
         this.ctx.beginPath();
         this.ctx.strokeStyle = '#f0f0f0';
         
@@ -1094,27 +1105,11 @@ class SpaghettiDiagramApp {
         if (gridInfoEl) {
             if (this.unitsPerPixel > 0) {
                 const unitsPerCell = this.unitsPerPixel * gridSizePx;
-                gridInfoEl.textContent = `Grid: ${unitsPerCell.toFixed(3)} ${this.units} per ${gridSizePx}px cell`;
+                gridInfoEl.textContent = `Grid: ${unitsPerCell.toFixed(3)} ${this.units} per cell`;
             } else {
                 gridInfoEl.textContent = 'Grid scale not set';
             }
         }
-    }
-        const gridSize = 20;
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = '#f0f0f0';
-        
-        for (let x = 0; x < this.canvas.width; x += gridSize) {
-            this.ctx.moveTo(x, 0);
-            this.ctx.lineTo(x, this.canvas.height);
-        }
-        
-        for (let y = 0; y < this.canvas.height; y += gridSize) {
-            this.ctx.moveTo(0, y);
-            this.ctx.lineTo(this.canvas.width, y);
-        }
-        
-        this.ctx.stroke();
     }
 
     drawObject(obj) {
@@ -1284,22 +1279,6 @@ class SpaghettiDiagramApp {
 
         this.updateHotspotList();
     }
-        // Reset and recalculate object visits from scratch based on current paths
-        this.objects.forEach(obj => obj.visits = 0);
-        this.paths.forEach(path => this.updateObjectVisits(path));
-
-        const totalPaths = this.paths.length;
-        const totalDistance = this.paths.reduce((sum, path) => sum + path.length, 0);
-        const weightedCost = this.paths.reduce((sum, path) => sum + (path.length * path.frequency), 0);
-        const avgPathLength = totalPaths > 0 ? totalDistance / totalPaths : 0;
-
-        document.getElementById('totalPaths').textContent = totalPaths;
-        document.getElementById('totalDistance').textContent = `${Math.round(totalDistance)} px`;
-        document.getElementById('weightedCost').textContent = Math.round(weightedCost);
-        document.getElementById('avgPathLength').textContent = `${Math.round(avgPathLength)} px`;
-
-        this.updateHotspotList();
-    }
     
     beginCalibration() {
         this.isCalibrating = true;
@@ -1319,6 +1298,7 @@ class SpaghettiDiagramApp {
                 const pxDist = Math.sqrt(dx*dx + dy*dy);
                 if (pxDist > 0) {
                     this.unitsPerPixel = realDistance / pxDist; // units per pixel
+                    this.saveScaleToStorage();
                     this.updateScaleUI();
                     this.updateAnalytics();
                     this.render();
@@ -1336,8 +1316,10 @@ class SpaghettiDiagramApp {
         this.units = this.units || 'ft';
         this.unitsPerPixel = 0;
         this.stepsPerUnit = 0;
+        this.gridCellUnits = 1;
         this.isCalibrating = false;
         this.calibrationPoints = [];
+        this.saveScaleToStorage();
         this.updateScaleUI();
         this.updateAnalytics();
         this.render();
@@ -1347,9 +1329,38 @@ class SpaghettiDiagramApp {
         const unitsSelect = document.getElementById('unitsSelect');
         const unitsPerPixelInput = document.getElementById('unitsPerPixel');
         const stepsPerUnitInput = document.getElementById('stepsPerUnit');
+        const gridCellUnitsInput = document.getElementById('gridCellUnits');
         if (unitsSelect) unitsSelect.value = this.units;
         if (unitsPerPixelInput) unitsPerPixelInput.value = this.unitsPerPixel || '';
         if (stepsPerUnitInput) stepsPerUnitInput.value = this.stepsPerUnit || '';
+        if (gridCellUnitsInput) gridCellUnitsInput.value = this.gridCellUnits || 1;
+    }
+
+    saveScaleToStorage() {
+        try {
+            const payload = {
+                units: this.units,
+                unitsPerPixel: this.unitsPerPixel,
+                stepsPerUnit: this.stepsPerUnit,
+                gridCellUnits: this.gridCellUnits
+            };
+            localStorage.setItem('spaghetti.scale', JSON.stringify(payload));
+        } catch (_) {}
+    }
+
+    loadScaleFromStorage() {
+        try {
+            const raw = localStorage.getItem('spaghetti.scale');
+            if (raw) {
+                const data = JSON.parse(raw);
+                if (data && typeof data === 'object') {
+                    if (data.units) this.units = data.units;
+                    if (typeof data.unitsPerPixel === 'number') this.unitsPerPixel = data.unitsPerPixel;
+                    if (typeof data.stepsPerUnit === 'number') this.stepsPerUnit = data.stepsPerUnit;
+                    if (typeof data.gridCellUnits === 'number') this.gridCellUnits = data.gridCellUnits;
+                }
+            }
+        } catch (_) {}
     }
     
     updateHotspotList() {
@@ -1729,6 +1740,12 @@ class SpaghettiDiagramApp {
             objects: this.objects,
             paths: this.paths,
             obstacles: this.obstacles,
+            scale: {
+                units: this.units,
+                unitsPerPixel: this.unitsPerPixel,
+                stepsPerUnit: this.stepsPerUnit,
+                gridCellUnits: this.gridCellUnits
+            },
             timestamp: new Date().toISOString()
         };
 

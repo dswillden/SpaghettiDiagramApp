@@ -77,6 +77,10 @@
                         <label class="form-label" for="stepsPerUnit">Steps per unit</label>
                         <input type="number" id="stepsPerUnit" class="form-control" step="0.0001" min="0" placeholder="e.g., 0.4 steps/ft">
                     </div>
+                    <div class="form-group">
+                        <label class="form-label" for="gridCellUnits">Grid cell size (in units)</label>
+                        <input type="number" id="gridCellUnits" class="form-control" step="0.01" min="0.01" placeholder="e.g., 1.0 for 1 ft per cell">
+                    </div>
                     <div class="btn-group">
                         <button id="calibrateScale" class="btn btn--secondary" title="Click two points to calibrate">Calibrate by Click</button>
                         <button id="resetScale" class="btn btn--outline">Reset Scale</button>
