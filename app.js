@@ -18,10 +18,19 @@ class SpaghettiDiagramApp {
         this.currentObstacle = null;
         this.tempPathPoints = null;
         
+        // Path endpoint selection state
+        this.selectedPath = null;
+        this.selectedEndpoint = null; // 'start' or 'end'
+        this.isDraggingEndpoint = false;
+        
         // Mouse state
         this.mousePos = { x: 0, y: 0 };
         this.dragStart = { x: 0, y: 0 };
         this.resizeHandle = null;
+        
+        // Delete mode state
+        this.hoveredDeleteItem = null;
+        this.deleteTooltip = null;
         
         // Predefined object templates
         this.objectTemplates = [
@@ -163,6 +172,10 @@ class SpaghettiDiagramApp {
         this.currentPath = [];
         this.currentObstacle = null;
         
+        // Clear delete mode state when switching tools
+        this.hoveredDeleteItem = null;
+        this.hideDeleteTooltip();
+        
         // Update button states
         document.querySelectorAll('.tool-btn').forEach(btn => {
             btn.classList.remove('active');
@@ -293,13 +306,28 @@ class SpaghettiDiagramApp {
             }
         }
         
+        // Check for path endpoint selection
+        const endpointInfo = this.getPathEndpointAt(this.mousePos);
+        if (endpointInfo) {
+            this.selectedPath = endpointInfo.path;
+            this.selectedEndpoint = endpointInfo.endpoint;
+            this.isDraggingEndpoint = true;
+            this.selectedObject = null;
+            this.render();
+            return;
+        }
+        
         // Check for object selection
         const clickedObject = this.getObjectAt(this.mousePos);
         if (clickedObject) {
             this.selectedObject = clickedObject;
+            this.selectedPath = null;
+            this.selectedEndpoint = null;
             this.isDragging = true;
         } else {
             this.selectedObject = null;
+            this.selectedPath = null;
+            this.selectedEndpoint = null;
         }
         
         this.render();
@@ -352,6 +380,9 @@ class SpaghettiDiagramApp {
             // Show helpful message when nothing is clicked
             this.showInfoMessage('Click on an object, path, or obstacle to delete it.', 'info');
         }
+        
+        // Hide tooltip after click
+        this.hideDeleteTooltip();
     }
     
     handleMouseMove(e) {
@@ -364,6 +395,8 @@ class SpaghettiDiagramApp {
             this.handlePathMouseMove();
         } else if (this.currentTool === 'obstacle' && this.isDrawing) {
             this.handleObstacleMouseMove();
+        } else if (this.currentTool === 'delete') {
+            this.handleDeleteMouseMove(e);
         }
     }
     
@@ -371,6 +404,8 @@ class SpaghettiDiagramApp {
         if (this.isResizing && this.selectedObject && this.resizeHandle) {
             this.handleResize();
             this.render();
+        } else if (this.isDraggingEndpoint && this.selectedPath && this.selectedEndpoint) {
+            this.handleEndpointDrag();
         } else if (this.isDragging && this.selectedObject) {
             const dx = this.mousePos.x - this.dragStart.x;
             const dy = this.mousePos.y - this.dragStart.y;
@@ -450,6 +485,7 @@ class SpaghettiDiagramApp {
         this.isDrawing = false;
         this.isDragging = false;
         this.isResizing = false;
+        this.isDraggingEndpoint = false;
         this.resizeHandle = null;
     }
     
@@ -701,6 +737,133 @@ class SpaghettiDiagramApp {
         return Math.sqrt((p.x - projectionX) ** 2 + (p.y - projectionY) ** 2);
     }
     
+    getPathEndpointAt(point, threshold = 12) {
+        for (const path of this.paths) {
+            if (path.points.length < 2) continue;
+            
+            // Check start point
+            const startPoint = path.points[0];
+            const startDistance = Math.sqrt(
+                Math.pow(point.x - startPoint.x, 2) + 
+                Math.pow(point.y - startPoint.y, 2)
+            );
+            if (startDistance <= threshold) {
+                return { path, endpoint: 'start' };
+            }
+            
+            // Check end point
+            const endPoint = path.points[path.points.length - 1];
+            const endDistance = Math.sqrt(
+                Math.pow(point.x - endPoint.x, 2) + 
+                Math.pow(point.y - endPoint.y, 2)
+            );
+            if (endDistance <= threshold) {
+                return { path, endpoint: 'end' };
+            }
+        }
+        return null;
+    }
+    
+    checkPathCollision(newPoint, path) {
+        // Check collision with objects
+        for (const obj of this.objects) {
+            if (this.pointIntersectsRect(newPoint, obj)) {
+                return { type: 'object', item: obj };
+            }
+        }
+        
+        // Check collision with obstacles
+        for (const obstacle of this.obstacles) {
+            if (this.pointIntersectsRect(newPoint, obstacle)) {
+                return { type: 'obstacle', item: obstacle };
+            }
+        }
+        
+        return null;
+    }
+    
+    pointIntersectsRect(point, rect) {
+        return point.x >= rect.x && 
+               point.x <= rect.x + rect.width &&
+               point.y >= rect.y && 
+               point.y <= rect.y + rect.height;
+    }
+    
+    checkPathSegmentCollision(p1, p2) {
+        // Check collision with objects
+        for (const obj of this.objects) {
+            if (this.lineIntersectsRect(p1, p2, obj)) {
+                return { type: 'object', item: obj };
+            }
+        }
+        
+        // Check collision with obstacles
+        for (const obstacle of this.obstacles) {
+            if (this.lineIntersectsRect(p1, p2, obstacle)) {
+                return { type: 'obstacle', item: obstacle };
+            }
+        }
+        
+        return null;
+    }
+    
+    lineIntersectsRect(p1, p2, rect) {
+        // Check if line segment intersects with rectangle
+        const rectLeft = rect.x;
+        const rectRight = rect.x + rect.width;
+        const rectTop = rect.y;
+        const rectBottom = rect.y + rect.height;
+        
+        // Check intersection with each edge of the rectangle
+        return this.lineIntersectsLine(p1, p2, {x: rectLeft, y: rectTop}, {x: rectRight, y: rectTop}) ||     // top
+               this.lineIntersectsLine(p1, p2, {x: rectRight, y: rectTop}, {x: rectRight, y: rectBottom}) ||  // right
+               this.lineIntersectsLine(p1, p2, {x: rectRight, y: rectBottom}, {x: rectLeft, y: rectBottom}) || // bottom
+               this.lineIntersectsLine(p1, p2, {x: rectLeft, y: rectBottom}, {x: rectLeft, y: rectTop}) ||     // left
+               (this.pointIntersectsRect(p1, rect) || this.pointIntersectsRect(p2, rect)); // endpoints inside rect
+    }
+    
+    lineIntersectsLine(p1, p2, p3, p4) {
+        // Check if line segment p1-p2 intersects with line segment p3-p4
+        const denom = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+        if (denom === 0) return false; // parallel lines
+        
+        const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denom;
+        const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denom;
+        
+        return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+    }
+    
+    handleEndpointDrag() {
+        if (!this.selectedPath || !this.selectedEndpoint) return;
+        
+        const newPoint = { ...this.mousePos };
+        
+        // Keep endpoint within canvas bounds
+        newPoint.x = Math.max(0, Math.min(this.canvas.width, newPoint.x));
+        newPoint.y = Math.max(0, Math.min(this.canvas.height, newPoint.y));
+        
+        // Check for collisions with objects and obstacles
+        const collision = this.checkPathCollision(newPoint, this.selectedPath);
+        if (collision) {
+            // Show warning but allow movement (don't block it completely)
+            this.showInfoMessage(`Cannot move path endpoint over ${collision.type}: ${collision.item.name || 'item'}`, 'warning');
+            return;
+        }
+        
+        // Update the endpoint position
+        if (this.selectedEndpoint === 'start') {
+            this.selectedPath.points[0] = newPoint;
+        } else if (this.selectedEndpoint === 'end') {
+            this.selectedPath.points[this.selectedPath.points.length - 1] = newPoint;
+        }
+        
+        // Recalculate path length and update analytics
+        this.selectedPath.length = this.calculatePathLength(this.selectedPath.points);
+        this.updateAnalytics();
+        
+        this.render();
+    }
+    
     updateObjectVisits(path) {
         const startObject = this.getObjectAt(path.points[0]);
         const endObject = this.getObjectAt(path.points[path.points.length - 1]);
@@ -747,6 +910,11 @@ class SpaghettiDiagramApp {
         // Draw selection handles if an object is selected
         if (this.selectedObject) {
             this.drawSelectionHandles(this.selectedObject);
+        }
+        
+        // Draw path endpoint handles if a path is selected
+        if (this.selectedPath) {
+            this.drawPathEndpointHandles(this.selectedPath);
         }
     }
 
@@ -839,6 +1007,59 @@ class SpaghettiDiagramApp {
             'se': { x: obj.x + obj.width, y: obj.y + obj.height },
         };
     }
+    
+    drawPathEndpointHandles(path) {
+        if (path.points.length < 2) return;
+        
+        const handleRadius = 6;
+        
+        // Highlight the entire path when selected
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = '#28a745';
+        this.ctx.lineWidth = Math.max(4, (path.frequency ? Math.min(1 + path.frequency / 2, 10) : 2) + 2);
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.setLineDash([5, 5]);
+        
+        this.ctx.moveTo(path.points[0].x, path.points[0].y);
+        for (let i = 1; i < path.points.length; i++) {
+            this.ctx.lineTo(path.points[i].x, path.points[i].y);
+        }
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        
+        // Draw start endpoint handle
+        const startPoint = path.points[0];
+        this.ctx.beginPath();
+        this.ctx.arc(startPoint.x, startPoint.y, handleRadius, 0, 2 * Math.PI);
+        this.ctx.fillStyle = '#28a745';
+        this.ctx.fill();
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+        
+        // Add "S" for start
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 10px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('S', startPoint.x, startPoint.y + 3);
+        
+        // Draw end endpoint handle
+        const endPoint = path.points[path.points.length - 1];
+        this.ctx.beginPath();
+        this.ctx.arc(endPoint.x, endPoint.y, handleRadius, 0, 2 * Math.PI);
+        this.ctx.fillStyle = '#dc3545';
+        this.ctx.fill();
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+        
+        // Add "E" for end
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 10px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('E', endPoint.x, endPoint.y + 3);
+    }
 
     calculatePathLength(points) {
         let length = 0;
@@ -893,6 +1114,172 @@ class SpaghettiDiagramApp {
             item.innerHTML = `<span>${name}</span> <span>${count} visits</span>`;
             hotspotList.appendChild(item);
         });
+    }
+
+    // Delete hover functionality methods
+    handleDeleteMouseMove(e) {
+        const point = this.mousePos;
+        let hoveredItem = null;
+        let hoverType = null;
+        let hoverName = null;
+
+        // Check for objects first, as they are on top
+        const hoveredObject = this.getObjectAt(point);
+        if (hoveredObject) {
+            hoveredItem = hoveredObject;
+            hoverType = 'object';
+            hoverName = hoveredObject.name;
+        } else {
+            // Check for paths
+            const hoveredPath = this.getPathAt(point);
+            if (hoveredPath) {
+                hoveredItem = hoveredPath;
+                hoverType = 'path';
+                hoverName = hoveredPath.description || 'Unnamed Path';
+            } else {
+                // Check for obstacles
+                const hoveredObstacle = this.getObstacleAt(point);
+                if (hoveredObstacle) {
+                    hoveredItem = hoveredObstacle;
+                    hoverType = 'obstacle';
+                    hoverName = 'Obstacle';
+                }
+            }
+        }
+
+        // Update hover state
+        if (hoveredItem && hoveredItem !== this.hoveredDeleteItem) {
+            this.hoveredDeleteItem = hoveredItem;
+            this.showDeleteTooltip(e, hoverType, hoverName);
+            this.highlightDeleteTarget(hoveredItem, hoverType);
+        } else if (!hoveredItem && this.hoveredDeleteItem) {
+            this.hoveredDeleteItem = null;
+            this.hideDeleteTooltip();
+            this.render(); // Remove highlighting
+        } else if (hoveredItem === this.hoveredDeleteItem) {
+            // Update tooltip position
+            this.updateDeleteTooltipPosition(e);
+        }
+    }
+    
+    showDeleteTooltip(e, type, name) {
+        this.hideDeleteTooltip();
+        
+        this.deleteTooltip = document.createElement('div');
+        this.deleteTooltip.className = 'delete-tooltip';
+        this.deleteTooltip.innerHTML = `
+            <div class="delete-tooltip-content">
+                <span class="delete-tooltip-icon">🗑️</span>
+                <span class="delete-tooltip-text">Delete ${type}: <strong>${name}</strong></span>
+            </div>
+        `;
+        
+        document.body.appendChild(this.deleteTooltip);
+        this.updateDeleteTooltipPosition(e);
+    }
+    
+    updateDeleteTooltipPosition(e) {
+        if (!this.deleteTooltip) return;
+        
+        const tooltip = this.deleteTooltip;
+        const offset = 15;
+        
+        // Position tooltip to the right and below cursor
+        let x = e.clientX + offset;
+        let y = e.clientY + offset;
+        
+        // Prevent tooltip from going off screen
+        const rect = tooltip.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        if (x + rect.width > viewportWidth) {
+            x = e.clientX - rect.width - offset;
+        }
+        if (y + rect.height > viewportHeight) {
+            y = e.clientY - rect.height - offset;
+        }
+        
+        tooltip.style.left = `${x}px`;
+        tooltip.style.top = `${y}px`;
+    }
+    
+    hideDeleteTooltip() {
+        if (this.deleteTooltip) {
+            this.deleteTooltip.remove();
+            this.deleteTooltip = null;
+        }
+    }
+    
+    highlightDeleteTarget(item, type) {
+        // Re-render to clear previous highlighting, then add highlight
+        this.render();
+        
+        if (type === 'object') {
+            this.drawDeleteHighlight(item);
+        } else if (type === 'path') {
+            this.drawPathDeleteHighlight(item);
+        } else if (type === 'obstacle') {
+            this.drawObstacleDeleteHighlight(item);
+        }
+    }
+    
+    drawDeleteHighlight(obj) {
+        const padding = 4;
+        this.ctx.strokeStyle = '#ff4757';
+        this.ctx.lineWidth = 3;
+        this.ctx.setLineDash([8, 4]);
+        this.ctx.strokeRect(
+            obj.x - padding, 
+            obj.y - padding, 
+            obj.width + padding * 2, 
+            obj.height + padding * 2
+        );
+        this.ctx.setLineDash([]);
+        
+        // Add pulsing effect background
+        this.ctx.fillStyle = 'rgba(255, 71, 87, 0.1)';
+        this.ctx.fillRect(
+            obj.x - padding, 
+            obj.y - padding, 
+            obj.width + padding * 2, 
+            obj.height + padding * 2
+        );
+    }
+    
+    drawPathDeleteHighlight(path) {
+        if (path.points.length < 2) return;
+        
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = '#ff4757';
+        this.ctx.lineWidth = Math.max(6, (path.frequency ? Math.min(1 + path.frequency / 2, 10) : 2) + 3);
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.setLineDash([10, 5]);
+        
+        this.ctx.moveTo(path.points[0].x, path.points[0].y);
+        for (let i = 1; i < path.points.length; i++) {
+            this.ctx.lineTo(path.points[i].x, path.points[i].y);
+        }
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+    }
+    
+    drawObstacleDeleteHighlight(obstacle) {
+        const padding = 4;
+        this.ctx.fillStyle = 'rgba(255, 71, 87, 0.2)';
+        this.ctx.strokeStyle = '#ff4757';
+        this.ctx.lineWidth = 3;
+        this.ctx.setLineDash([8, 4]);
+        
+        const x = obstacle.width < 0 ? obstacle.x + obstacle.width : obstacle.x;
+        const y = obstacle.height < 0 ? obstacle.y + obstacle.height : obstacle.y;
+        const w = Math.abs(obstacle.width);
+        const h = Math.abs(obstacle.height);
+        
+        this.ctx.fillRect(x - padding, y - padding, w + padding * 2, h + padding * 2);
+        this.ctx.strokeRect(x - padding, y - padding, w + padding * 2, h + padding * 2);
+        this.ctx.setLineDash([]);
     }
 
     // Enhanced delete functionality methods

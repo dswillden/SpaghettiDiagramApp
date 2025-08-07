@@ -975,7 +975,51 @@ select.form-control {
 }
 
 #workspaceCanvas.delete-mode {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="%23dc3545" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,6 5,6 21,6"></polyline><path d="M19,6L17,20H7L5,6"></path><path d="M10,11V17"></path><path d="M14,11V17"></path><path d="M9,6V4A1,1,0,0,1,10,3H14A1,1,0,0,1,15,4V6"></path></svg>') 10 10, auto;
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23dc3545" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,6 5,6 21,6"></polyline><path d="M19,6L17,20H7L5,6"></path><path d="M10,11V17"></path><path d="M14,11V17"></path><path d="M9,6V4A1,1,0,0,1,10,3H14A1,1,0,0,1,15,4V6"></path></svg>') 12 12, auto;
+}
+
+/* Delete tooltip styles */
+.delete-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  max-width: 300px;
+}
+
+.delete-tooltip-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  background: rgba(255, 71, 87, 0.95);
+  color: white;
+  border-radius: var(--radius-base);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 71, 87, 0.2);
+  animation: tooltipFadeIn 0.2s ease-out;
+}
+
+.delete-tooltip-icon {
+  font-size: var(--font-size-lg);
+  opacity: 0.9;
+}
+
+.delete-tooltip-text strong {
+  font-weight: var(--font-weight-bold);
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8) translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .canvas-overlay {
