@@ -248,12 +248,31 @@
               document.head.appendChild(s);
             });
           }
-          function setWorker(base){
+          async function setWorker(base){
             if (!window.pdfjsLib) return;
-            var worker = base === 'local'
-              ? 'libs/pdfjs/pdf.worker.min.js'
-              : base + '/pdf.worker.min.js';
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
+            try {
+              if (base === 'local') {
+                // Try local worker path
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdfjs/pdf.worker.min.js';
+                return;
+              }
+              // Try to fetch worker JS and create a blob URL so it works even from file:// or with CORS limits
+              var workerUrl = base + '/pdf.worker.min.js';
+              var resp = await fetch(workerUrl);
+              if (resp.ok) {
+                var code = await resp.text();
+                var blob = new Blob([code], { type: 'application/javascript' });
+                var blobUrl = URL.createObjectURL(blob);
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
+                window.__pdfjsWorkerBlob = blobUrl; // keep reference for debugging
+                return;
+              }
+              // Fallback: directly set URL (may fail on some setups)
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+            } catch (err) {
+              // Last resort: set to CDN jsDelivr worker
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+            }
           }
           (async function(){
             var tried = [];
@@ -267,7 +286,7 @@
               var src = sources[i];
               try{
                 await loadScript(src.url);
-                if (window.pdfjsLib){ setWorker(src.base); break; }
+                if (window.pdfjsLib){ await setWorker(src.base); break; }
               }catch(e){ tried.push(src.label); }
             }
             // Optional: expose which sources failed for debugging
