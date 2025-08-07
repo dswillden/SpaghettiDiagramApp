@@ -63,6 +63,13 @@ class SpaghettiDiagramApp {
         this.gridCellUnits = 1; // default 1 unit per grid cell
         this.isCalibrating = false;
         this.calibrationPoints = [];
+        
+        // Viewport (pan and zoom)
+        this.zoom = 1;
+        this.pan = { x: 0, y: 0 }; // in screen pixels
+        this.isPanning = false;
+        this.lastClientPos = { x: 0, y: 0 };
+        
         this.loadScaleFromStorage();
         this.updateScaleUI();
         
@@ -118,10 +125,22 @@ class SpaghettiDiagramApp {
         if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => applyZoom(this.zoom / 1.2));
         if (resetZoomBtn) resetZoomBtn.addEventListener('click', () => applyZoom(1));
         
-        // Mouse wheel zoom (Ctrl+wheel)
+        // Mouse wheel zoom (no modifier) with cursor focus
         this.canvas.addEventListener('wheel', (ev) => {
-            if (!ev.ctrlKey) return; ev.preventDefault();
-            const delta = ev.deltaY; const factor = delta > 0 ? 1/1.1 : 1.1; applyZoom(this.zoom * factor);
+            ev.preventDefault();
+            const rect = this.canvas.getBoundingClientRect();
+            const screenX = ev.clientX - rect.left;
+            const screenY = ev.clientY - rect.top;
+            const worldX = (screenX - this.pan.x) / (this.zoom || 1);
+            const worldY = (screenY - this.pan.y) / (this.zoom || 1);
+            const factor = ev.deltaY > 0 ? 1/1.1 : 1.1;
+            const newZoom = Math.max(0.25, Math.min(4, (this.zoom || 1) * factor));
+            // Adjust pan to keep cursor focus point stable
+            this.zoom = newZoom;
+            this.pan.x = screenX - this.zoom * worldX;
+            this.pan.y = screenY - this.zoom * worldY;
+            this.saveScaleToStorage();
+            this.render();
         }, { passive: false });
         
         
@@ -386,6 +405,13 @@ class SpaghettiDiagramApp {
         this.mousePos = this.getMousePos(e);
         this.dragStart = { ...this.mousePos };
         
+        // Start panning with middle or right mouse, or left-click on empty space in select mode
+        if (e.button === 1 || e.button === 2 || (e.button === 0 && this.currentTool === 'select' && !this.getObjectAt(this.mousePos) && !this.getPathEndpointAt(this.mousePos))) {
+            this.isPanning = true;
+            this.lastClientPos = { x: e.clientX, y: e.clientY };
+            return;
+        }
+        
         // Calibration click handling has priority
         if (this.isCalibrating) {
             this.handleCalibrationClick();
@@ -495,6 +521,17 @@ class SpaghettiDiagramApp {
     
     handleMouseMove(e) {
         e.preventDefault();
+        // Handle panning first
+        if (this.isPanning) {
+            const dx = e.clientX - this.lastClientPos.x;
+            const dy = e.clientY - this.lastClientPos.y;
+            this.pan.x += dx;
+            this.pan.y += dy;
+            this.lastClientPos = { x: e.clientX, y: e.clientY };
+            this.render();
+            return;
+        }
+        
         this.mousePos = this.getMousePos(e);
         
         if (this.isCalibrating) {
@@ -601,6 +638,10 @@ class SpaghettiDiagramApp {
     
     handleMouseUp(e) {
         e.preventDefault();
+        
+        if (this.isPanning) {
+            this.isPanning = false;
+        }
         
         if (this.currentTool === 'path' && this.isDrawing && this.currentPath.length > 1) {
             this.finalizePath();
@@ -1006,10 +1047,10 @@ class SpaghettiDiagramApp {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
-        // Draw background (image or rendered PDF) with orientation transforms
-        // Apply zoom for all rendering
+        // Apply zoom and pan for all rendering
         this.ctx.save();
         this.ctx.scale(this.zoom || 1, this.zoom || 1);
+        this.ctx.translate(this.pan.x / (this.zoom || 1), this.pan.y / (this.zoom || 1));
         
         const bgSource = this.backgroundPdfPageCanvas || this.backgroundImage;
         if (bgSource) {
@@ -1078,6 +1119,7 @@ class SpaghettiDiagramApp {
         const cx = this.canvas.width / 2;
         const cy = this.canvas.height / 2;
         this.ctx.save();
+        // Account for pan and zoom already applied; use canvas size in world coordinates
         this.ctx.translate(cx, cy);
         this.ctx.rotate((rotation % 360) * Math.PI / 180);
         this.ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
@@ -1349,11 +1391,9 @@ class SpaghettiDiagramApp {
 
     updateScaleUI() {
         const unitsSelect = document.getElementById('unitsSelect');
-        const unitsPerPixelInput = document.getElementById('unitsPerPixel');
         const stepsPerUnitInput = document.getElementById('stepsPerUnit');
         const gridCellUnitsInput = document.getElementById('gridCellUnits');
         if (unitsSelect) unitsSelect.value = this.units;
-        if (unitsPerPixelInput) unitsPerPixelInput.value = this.unitsPerPixel || '';
         if (stepsPerUnitInput) stepsPerUnitInput.value = this.stepsPerUnit || '';
         if (gridCellUnitsInput) gridCellUnitsInput.value = this.gridCellUnits || 1;
     }
