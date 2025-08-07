@@ -124,6 +124,8 @@ class SpaghettiDiagramApp {
         if (zoomInBtn) zoomInBtn.addEventListener('click', () => applyZoom(this.zoom * 1.2));
         if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => applyZoom(this.zoom / 1.2));
         if (resetZoomBtn) resetZoomBtn.addEventListener('click', () => applyZoom(1));
+        const resetViewBtn = document.getElementById('resetView');
+        if (resetViewBtn) resetViewBtn.addEventListener('click', () => { this.resetView(); });
         
         // Mouse wheel zoom (no modifier) with cursor focus
         this.canvas.addEventListener('wheel', (ev) => {
@@ -1780,6 +1782,13 @@ class SpaghettiDiagramApp {
 
     resetBackgroundTransform() {
         this.backgroundTransform = { rotation: 0, flipH: false, flipV: false };
+        this.render();
+    }
+
+    resetView() {
+        this.zoom = 1;
+        this.pan = { x: 0, y: 0 };
+        this.saveScaleToStorage();
         this.render();
     }
     
