@@ -1073,6 +1073,7 @@ select.form-control {
   display: none;
 }
 
+/* Default modal content */
 .modal-content {
   background: var(--color-surface);
   border-radius: var(--radius-lg);
@@ -1081,6 +1082,25 @@ select.form-control {
   max-width: 500px;
   max-height: 90vh;
   overflow-y: auto;
+}
+
+/* Calibration modal as right-side panel so it does not cover the canvas */
+#calibrateModal.modal {
+  left: auto;
+  right: 0;
+  width: 360px;
+  max-width: 40vw;
+  background: transparent; /* no dark backdrop */
+  align-items: stretch;
+  justify-content: flex-end;
+  backdrop-filter: none;
+}
+#calibrateModal .modal-content {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  border-radius: 0;
+  border-left: 1px solid var(--color-border);
 }
 
 .modal-header {

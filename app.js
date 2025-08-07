@@ -563,20 +563,8 @@ class SpaghettiDiagramApp {
         this.mousePos = this.getMousePos(e);
         
         if (this.isCalibrating) {
-            // show a temporary line between first point and current cursor
+            // Redraw to show provisional line within transformed space
             this.render();
-            if (this.calibrationPoints.length === 1) {
-                const p = this.calibrationPoints[0];
-                this.ctx.save();
-                this.ctx.strokeStyle = '#6c5ce7';
-                this.ctx.setLineDash([6, 4]);
-                this.ctx.lineWidth = 2;
-                this.ctx.beginPath();
-                this.ctx.moveTo(p.x, p.y);
-                this.ctx.lineTo(this.mousePos.x, this.mousePos.y);
-                this.ctx.stroke();
-                this.ctx.restore();
-            }
             return;
         }
         
@@ -1088,7 +1076,7 @@ class SpaghettiDiagramApp {
         // Draw grid
         this.drawGrid();
         
-        // Draw calibration points if calibrating
+        // Draw calibration points/line if calibrating (in world coordinates)
         if (this.isCalibrating && this.calibrationPoints.length > 0) {
             this.ctx.save();
             this.ctx.fillStyle = '#6c5ce7';
@@ -1098,12 +1086,18 @@ class SpaghettiDiagramApp {
                 this.ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
                 this.ctx.fill();
             }
+            this.ctx.setLineDash([6,4]);
+            this.ctx.lineWidth = 2;
             if (this.calibrationPoints.length === 2) {
-                this.ctx.setLineDash([6,4]);
-                this.ctx.lineWidth = 2;
                 this.ctx.beginPath();
                 this.ctx.moveTo(this.calibrationPoints[0].x, this.calibrationPoints[0].y);
                 this.ctx.lineTo(this.calibrationPoints[1].x, this.calibrationPoints[1].y);
+                this.ctx.stroke();
+            } else if (this.calibrationPoints.length === 1) {
+                // Provisional line to current mouse position
+                this.ctx.beginPath();
+                this.ctx.moveTo(this.calibrationPoints[0].x, this.calibrationPoints[0].y);
+                this.ctx.lineTo(this.mousePos.x, this.mousePos.y);
                 this.ctx.stroke();
             }
             this.ctx.restore();
