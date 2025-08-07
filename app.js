@@ -394,9 +394,9 @@ class SpaghettiDiagramApp {
     
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
-        // Account for zoom
-        const x = (e.clientX - rect.left) / (this.zoom || 1);
-        const y = (e.clientY - rect.top) / (this.zoom || 1);
+        // Account for pan (screen px) and zoom
+        const x = (e.clientX - rect.left - this.pan.x) / (this.zoom || 1);
+        const y = (e.clientY - rect.top - this.pan.y) / (this.zoom || 1);
         return { x, y };
     }
     
@@ -405,16 +405,16 @@ class SpaghettiDiagramApp {
         this.mousePos = this.getMousePos(e);
         this.dragStart = { ...this.mousePos };
         
+        // Calibration click handling has priority
+        if (this.isCalibrating) {
+            this.handleCalibrationClick();
+            return;
+        }
+        
         // Start panning with middle or right mouse, or left-click on empty space in select mode
         if (e.button === 1 || e.button === 2 || (e.button === 0 && this.currentTool === 'select' && !this.getObjectAt(this.mousePos) && !this.getPathEndpointAt(this.mousePos))) {
             this.isPanning = true;
             this.lastClientPos = { x: e.clientX, y: e.clientY };
-            return;
-        }
-        
-        // Calibration click handling has priority
-        if (this.isCalibrating) {
-            this.handleCalibrationClick();
             return;
         }
         
@@ -1047,10 +1047,10 @@ class SpaghettiDiagramApp {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
-        // Apply zoom and pan for all rendering
+        // Apply pan (in screen pixels) then zoom for all rendering
         this.ctx.save();
+        this.ctx.translate(this.pan.x, this.pan.y);
         this.ctx.scale(this.zoom || 1, this.zoom || 1);
-        this.ctx.translate(this.pan.x / (this.zoom || 1), this.pan.y / (this.zoom || 1));
         
         const bgSource = this.backgroundPdfPageCanvas || this.backgroundImage;
         if (bgSource) {
