@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spaghetti Diagram Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <h1>Spaghetti Diagram Tool</h1>
+                <div class="header-actions">
+                    <input type="file" id="imageUpload" accept="image/*" class="sr-only">
+                    <label for="imageUpload" class="btn btn--primary">Upload Workspace Image</label>
+                    <button id="clearAll" class="btn btn--secondary">Clear All</button>
+                    <button id="exportData" class="btn btn--outline">Export Data</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="app-body">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h3>Tools</h3>
+                    <div class="tool-buttons">
+                        <button id="selectTool" class="tool-btn active" data-tool="select">
+                            <span class="tool-icon">↖</span>
+                            Select
+                        </button>
+                        <button id="pathTool" class="tool-btn" data-tool="path">
+                            <span class="tool-icon">✏</span>
+                            Draw Path
+                        </button>
+                        <button id="obstacleTool" class="tool-btn" data-tool="obstacle">
+                            <span class="tool-icon">⚠</span>
+                            Add Obstacle
+                        </button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>Objects</h3>
+                    <div class="object-palette" id="objectPalette">
+                        <!-- Objects will be populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>Analytics</h3>
+                    <div class="analytics-panel" id="analyticsPanel">
+                        <div class="metric">
+                            <div class="metric-label">Total Paths</div>
+                            <div class="metric-value" id="totalPaths">0</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Total Distance</div>
+                            <div class="metric-value" id="totalDistance">0 px</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Weighted Cost</div>
+                            <div class="metric-value" id="weightedCost">0</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Avg Path Length</div>
+                            <div class="metric-value" id="avgPathLength">0 px</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>Most Visited Areas</h3>
+                    <div class="hotspot-list" id="hotspotList">
+                        <div class="empty-state">No paths drawn yet</div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Canvas Area -->
+            <main class="canvas-container">
+                <div class="canvas-wrapper">
+                    <canvas id="workspaceCanvas" width="1000" height="700"></canvas>
+                    <div class="canvas-overlay" id="canvasOverlay"></div>
+                </div>
+                <div class="canvas-info">
+                    <span id="canvasInfo">Click and drag to interact with objects. Use tools from the sidebar.</span>
+                </div>
+            </main>
+        </div>
+
+        <!-- Path Metadata Modal -->
+        <div class="modal hidden" id="pathModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Path Details</h3>
+                    <button class="modal-close" id="closePathModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="pathForm">
+                        <div class="form-group">
+                            <label class="form-label" for="pathDescription">Description</label>
+                            <input type="text" id="pathDescription" class="form-control" 
+                                   placeholder="e.g., Walk from Desk to Machine A" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="pathFrequency">Daily Frequency</label>
+                            <input type="number" id="pathFrequency" class="form-control" 
+                                   placeholder="Number of times per day" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="pathColor">Path Color</label>
+                            <select id="pathColor" class="form-control">
+                                <option value="#FF0000">Red</option>
+                                <option value="#00FF00">Green</option>
+                                <option value="#0000FF">Blue</option>
+                                <option value="#FFA500">Orange</option>
+                                <option value="#800080">Purple</option>
+                                <option value="#FFFF00">Yellow</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn--secondary" id="cancelPath">Cancel</button>
+                    <button type="submit" form="pathForm" class="btn btn--primary" id="savePath">Save Path</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Object Details Modal -->
+        <div class="modal hidden" id="objectModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Object Details</h3>
+                    <button class="modal-close" id="closeObjectModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="objectForm">
+                        <div class="form-group">
+                            <label class="form-label" for="objectName">Name</label>
+                            <input type="text" id="objectName" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="objectType">Type</label>
+                            <select id="objectType" class="form-control" required>
+                                <!-- Options will be populated by JavaScript -->
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn--secondary" id="deleteObject">Delete Object</button>
+                    <button type="submit" form="objectForm" class="btn btn--primary" id="updateObject">Update</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay hidden" id="loadingOverlay">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Processing...</div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
