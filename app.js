@@ -332,17 +332,20 @@ class SpaghettiDiagramApp {
         
         const type = file.type || '';
         try {
+            console.log('[Upload] Selected file:', { name: file.name, type: file.type, size: file.size });
             if (type.startsWith('image/')) {
                 await this.loadBackgroundImage(file);
+                this.resetView();
                 this.showInfoMessage('Background image loaded successfully!', 'success');
             } else if (type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
                 await this.loadBackgroundPdf(file);
+                this.resetView();
                 this.showInfoMessage('Background PDF loaded (first page).', 'success');
             } else {
                 alert('Please select an image or PDF file.');
             }
         } catch (err) {
-            console.error(err);
+            console.error('[Upload] Failed to load background:', err);
             this.showInfoMessage(`Failed to load background: ${err && err.message ? err.message : err}`, 'error');
         }
     }
@@ -353,14 +356,21 @@ class SpaghettiDiagramApp {
             reader.onload = (ev) => {
                 const img = new Image();
                 img.onload = () => {
+                    console.log('[Upload] Image loaded:', { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
                     this.backgroundImage = img;
                     this.render();
                     resolve();
                 };
-                img.onerror = () => reject(new Error('Image load error'));
+                img.onerror = (e) => {
+                    console.error('[Upload] Image load error', e);
+                    reject(new Error('Image load error'));
+                };
                 img.src = ev.target.result;
             };
-            reader.onerror = () => reject(new Error('File read error'));
+            reader.onerror = (e) => {
+                console.error('[Upload] File read error', e);
+                reject(new Error('File read error'));
+            };
             reader.readAsDataURL(file);
         });
     }
@@ -378,6 +388,7 @@ class SpaghettiDiagramApp {
                 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
             }
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            console.log('[Upload] PDF loaded, pages:', pdf.numPages);
             const page = await pdf.getPage(1);
             
             // Render page to an offscreen canvas at scale to fit our workspace
@@ -399,8 +410,10 @@ class SpaghettiDiagramApp {
             };
             await page.render(renderContext).promise;
             this.backgroundPdfPageCanvas = offscreen;
+            console.log('[Upload] PDF page rendered to canvas:', { width: offscreen.width, height: offscreen.height });
             this.render();
         } catch (err) {
+            console.error('[Upload] PDF render failed', err);
             throw new Error(`PDF render failed: ${err && err.message ? err.message : err}`);
         } finally {
             this.setLoading(false);
@@ -1139,10 +1152,24 @@ class SpaghettiDiagramApp {
         this.ctx.rotate((rotation % 360) * Math.PI / 180);
         this.ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
         
+        // Compute source intrinsic size for images if width/height are missing
+        let srcW = source.width;
+        let srcH = source.height;
+        if (source.naturalWidth && source.naturalHeight) {
+            srcW = source.naturalWidth;
+            srcH = source.naturalHeight;
+        }
+        if (!srcW || !srcH) {
+            // Fallback: draw without scaling
+            try { this.ctx.drawImage(source, -this.canvas.width/2, -this.canvas.height/2); } catch (_) {}
+            this.ctx.restore();
+            return;
+        }
+        
         // Compute draw size maintaining aspect ratio to fit canvas
         let dw = this.canvas.width;
         let dh = this.canvas.height;
-        const imgAspect = source.width / source.height;
+        const imgAspect = srcW / srcH;
         const canvasAspect = this.canvas.width / this.canvas.height;
         if (imgAspect > canvasAspect) {
             dw = this.canvas.width;
