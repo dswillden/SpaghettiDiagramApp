@@ -974,6 +974,10 @@ select.form-control {
   cursor: cell;
 }
 
+#workspaceCanvas.delete-mode {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="%23dc3545" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,6 5,6 21,6"></polyline><path d="M19,6L17,20H7L5,6"></path><path d="M10,11V17"></path><path d="M14,11V17"></path><path d="M9,6V4A1,1,0,0,1,10,3H14A1,1,0,0,1,15,4V6"></path></svg>') 10 10, auto;
+}
+
 .canvas-overlay {
   position: absolute;
   pointer-events: none;
@@ -1194,6 +1198,55 @@ select.form-control {
   background: var(--color-text-secondary);
 }
 
+/* Enhanced Delete Modal Styles */
+.delete-confirmation {
+  text-align: center;
+  padding: var(--space-16);
+}
+
+.delete-icon {
+  font-size: 48px;
+  margin-bottom: var(--space-16);
+  opacity: 0.8;
+}
+
+.delete-warning {
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+  margin: var(--space-8) 0;
+  font-style: italic;
+}
+
+.delete-warning strong {
+  color: var(--color-error);
+  font-weight: var(--font-weight-bold);
+}
+
+.btn--error {
+  background: var(--color-error);
+  color: var(--color-white);
+  border: 1px solid var(--color-error);
+}
+
+.btn--error:hover {
+  background: rgba(var(--color-error-rgb), 0.9);
+  border-color: rgba(var(--color-error-rgb), 0.9);
+}
+
+.btn--error:active {
+  background: rgba(var(--color-error-rgb), 0.8);
+  border-color: rgba(var(--color-error-rgb), 0.8);
+}
+
+/* Hover effects for delete mode */
+.canvas-container.delete-mode {
+  cursor: crosshair;
+}
+
+.canvas-container.delete-mode #workspaceCanvas:hover {
+  filter: brightness(0.95);
+}
+
 /* Animation Classes */
 .fade-in {
   animation: fadeIn 0.3s ease-in-out;
@@ -1212,4 +1265,14 @@ select.form-control {
   0% { opacity: 1; }
   50% { opacity: 0.5; }
   100% { opacity: 1; }
+}
+
+.shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
 }
