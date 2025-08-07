@@ -168,6 +168,18 @@ class SpaghettiDiagramApp {
         document.getElementById('deleteObject').addEventListener('click', this.deleteSelectedObject.bind(this));
         document.getElementById('objectForm').addEventListener('submit', this.updateObjectMetadata.bind(this));
         
+        // Calibration modal
+        const calibModal = document.getElementById('calibrateModal');
+        const closeCalib = document.getElementById('closeCalibrateModal');
+        const cancelCalib = document.getElementById('cancelCalibration');
+        const confirmCalib = document.getElementById('confirmCalibration');
+        const redoCalib = document.getElementById('redoCalibration');
+        if (closeCalib) closeCalib.addEventListener('click', this.closeCalibrateModal.bind(this));
+        if (cancelCalib) cancelCalib.addEventListener('click', this.closeCalibrateModal.bind(this));
+        if (redoCalib) redoCalib.addEventListener('click', () => { this.calibrationPoints = []; this.updateCalibrateInfo(0); this.closeCalibrateModal(); this.beginCalibration(); });
+        if (confirmCalib) confirmCalib.addEventListener('click', this.applyCalibrationFromModal.bind(this));
+        if (calibModal) calibModal.addEventListener('click', (e) => { if (e.target.classList.contains('modal')) this.closeCalibrateModal(); });
+        
         // Close modals on backdrop click
         document.getElementById('pathModal').addEventListener('click', (e) => {
             if (e.target.classList.contains('modal')) this.closePathModal();
@@ -182,6 +194,7 @@ class SpaghettiDiagramApp {
                 this.closePathModal();
                 this.closeObjectModal();
                 this.closeDeleteModal();
+                this.closeCalibrateModal();
             } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedObject) {
                 // Delete selected object with keyboard shortcut
                 e.preventDefault();
@@ -1350,31 +1363,29 @@ class SpaghettiDiagramApp {
         this.isCalibrating = true;
         this.calibrationPoints = [];
         this.showInfoMessage('Calibration: click two points with a known real distance.', 'info');
+        // Ensure modal shows the correct units label
+        const unitsEl = document.getElementById('calibrateUnits');
+        if (unitsEl) unitsEl.textContent = this.units;
+        this.updateCalibrateInfo(0);
     }
 
     handleCalibrationClick() {
+        // Debounce identical consecutive clicks
+        const last = this.calibrationPoints[this.calibrationPoints.length - 1];
+        if (last && Math.hypot(this.mousePos.x - last.x, this.mousePos.y - last.y) < 2) return;
+        
         this.calibrationPoints.push({ x: this.mousePos.x, y: this.mousePos.y });
         if (this.calibrationPoints.length === 2) {
-            // Prompt for real distance
-            const distanceStr = prompt(`Enter real distance between points in ${this.units}:`, '10');
-            const realDistance = distanceStr ? parseFloat(distanceStr) : NaN;
-            if (!isNaN(realDistance) && realDistance > 0) {
-                const dx = this.calibrationPoints[1].x - this.calibrationPoints[0].x;
-                const dy = this.calibrationPoints[1].y - this.calibrationPoints[0].y;
-                const pxDist = Math.sqrt(dx*dx + dy*dy);
-                if (pxDist > 0) {
-                    this.unitsPerPixel = realDistance / pxDist; // units per pixel
-                    this.saveScaleToStorage();
-                    this.updateScaleUI();
-                    this.updateAnalytics();
-                    this.render();
-                    this.showInfoMessage(`Scale set: ${this.unitsPerPixel.toFixed(4)} ${this.units}/px`, 'success');
-                }
-            } else {
-                this.showInfoMessage('Calibration canceled or invalid distance.', 'warning');
+            const dx = this.calibrationPoints[1].x - this.calibrationPoints[0].x;
+            const dy = this.calibrationPoints[1].y - this.calibrationPoints[0].y;
+            const pxDist = Math.sqrt(dx*dx + dy*dy);
+            if (pxDist <= 0.0001) {
+                this.showInfoMessage('Calibration points are too close. Please click points farther apart.', 'warning');
+                this.calibrationPoints = [];
+                return;
             }
-            this.isCalibrating = false;
-            this.calibrationPoints = [];
+            // Open calibration modal with measured px distance
+            this.openCalibrateModal(pxDist);
         }
     }
 
@@ -1398,6 +1409,72 @@ class SpaghettiDiagramApp {
         if (unitsSelect) unitsSelect.value = this.units;
         if (stepsPerUnitInput) stepsPerUnitInput.value = this.stepsPerUnit || '';
         if (gridCellUnitsInput) gridCellUnitsInput.value = this.gridCellUnits || 1;
+    }
+
+    openCalibrateModal(pxDist) {
+        const modal = document.getElementById('calibrateModal');
+        if (!modal) {
+            // Fallback to prompt if modal missing
+            const distanceStr = prompt(`Enter real distance between points in ${this.units}:`, '10');
+            const realDistance = distanceStr ? parseFloat(distanceStr) : NaN;
+            if (!isNaN(realDistance) && realDistance > 0) {
+                this.unitsPerPixel = realDistance / pxDist;
+                this.saveScaleToStorage();
+                this.updateScaleUI();
+                this.updateAnalytics();
+                this.render();
+                this.showInfoMessage(`Scale set: ${this.unitsPerPixel.toFixed(4)} ${this.units}/px`, 'success');
+            } else {
+                this.showInfoMessage('Calibration canceled or invalid distance.', 'warning');
+            }
+            this.isCalibrating = false;
+            this.calibrationPoints = [];
+            return;
+        }
+        this._pendingPxDist = pxDist;
+        this.updateCalibrateInfo(pxDist);
+        modal.classList.remove('hidden');
+        const input = document.getElementById('calibrateDistance');
+        if (input) { input.value = ''; input.focus(); }
+    }
+
+    closeCalibrateModal() {
+        const modal = document.getElementById('calibrateModal');
+        if (modal) modal.classList.add('hidden');
+        this.isCalibrating = false;
+        this.calibrationPoints = [];
+        this._pendingPxDist = undefined;
+    }
+
+    updateCalibrateInfo(pxDist) {
+        const infoEl = document.getElementById('calibrateInfo');
+        if (infoEl) infoEl.textContent = `Measured pixel distance: ${pxDist.toFixed ? pxDist.toFixed(2) : pxDist} px`;
+        const unitsEl = document.getElementById('calibrateUnits');
+        if (unitsEl) unitsEl.textContent = this.units;
+    }
+
+    applyCalibrationFromModal() {
+        const input = document.getElementById('calibrateDistance');
+        const raw = input ? String(input.value).trim() : '';
+        const val = parseFloat(raw);
+        if (!raw || isNaN(val) || val <= 0) {
+            this.showInfoMessage('Please enter a valid distance greater than zero.', 'warning');
+            if (input) input.focus();
+            return;
+        }
+        const pxDist = this._pendingPxDist || 0;
+        if (pxDist <= 0.0001) {
+            this.showInfoMessage('Calibration points are invalid. Please redo calibration.', 'warning');
+            this.closeCalibrateModal();
+            return;
+        }
+        this.unitsPerPixel = val / pxDist;
+        this.saveScaleToStorage();
+        this.updateScaleUI();
+        this.updateAnalytics();
+        this.render();
+        this.showInfoMessage(`Scale set: ${this.unitsPerPixel.toFixed(4)} ${this.units}/px`, 'success');
+        this.closeCalibrateModal();
     }
 
     saveScaleToStorage() {
