@@ -15,12 +15,17 @@
                 <div class="header-actions">
                     <input type="file" id="backgroundUpload" accept="image/*,.pdf,application/pdf" class="sr-only">
                     <label for="backgroundUpload" class="btn btn--primary">Upload Background (Image/PDF)</label>
-                    <div class="btn-group" aria-label="Background Orientation Controls">
+                    	<div class="btn-group" aria-label="Background Orientation Controls">
                         <button id="rotateLeft" class="btn btn--secondary" title="Rotate Left 90°">⟲</button>
                         <button id="rotateRight" class="btn btn--secondary" title="Rotate Right 90°">⟳</button>
                         <button id="flipH" class="btn btn--secondary" title="Flip Horizontal">⇆</button>
                         <button id="flipV" class="btn btn--secondary" title="Flip Vertical">⇅</button>
                         <button id="resetOrientation" class="btn btn--outline" title="Reset Orientation">Reset</button>
+                    </div>
+                    <div class="btn-group" aria-label="Zoom Controls">
+                        <button id="zoomOut" class="btn btn--secondary" title="Zoom Out">−</button>
+                        <button id="zoomIn" class="btn btn--secondary" title="Zoom In">+</button>
+                        <button id="resetZoom" class="btn btn--outline" title="Reset Zoom">100%</button>
                     </div>
                     <button id="clearAll" class="btn btn--secondary">Clear All</button>
                     <button id="exportData" class="btn btn--outline">Export Data</button>
@@ -68,10 +73,6 @@
                             <option value="ft" selected>Feet (ft)</option>
                             <option value="m">Meters (m)</option>
                         </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="unitsPerPixel">Scale (units per pixel)</label>
-                        <input type="number" id="unitsPerPixel" class="form-control" step="0.0001" min="0" placeholder="e.g., 0.05 for 1 ft per 20 px">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="stepsPerUnit">Steps per unit</label>

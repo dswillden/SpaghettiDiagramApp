@@ -87,14 +87,12 @@ class SpaghettiDiagramApp {
         
         // Scale controls
         const unitsSelect = document.getElementById('unitsSelect');
-        const unitsPerPixelInput = document.getElementById('unitsPerPixel');
         const stepsPerUnitInput = document.getElementById('stepsPerUnit');
         const gridCellUnitsInput = document.getElementById('gridCellUnits');
         const calibrateBtn = document.getElementById('calibrateScale');
         const resetScaleBtn = document.getElementById('resetScale');
         const persist = () => this.saveScaleToStorage();
         if (unitsSelect) unitsSelect.addEventListener('change', (e) => { this.units = e.target.value; this.updateScaleUI(); this.updateAnalytics(); this.render(); persist(); });
-        if (unitsPerPixelInput) unitsPerPixelInput.addEventListener('change', (e) => { this.unitsPerPixel = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); this.render(); persist(); });
         if (stepsPerUnitInput) stepsPerUnitInput.addEventListener('change', (e) => { this.stepsPerUnit = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); persist(); });
         if (gridCellUnitsInput) gridCellUnitsInput.addEventListener('change', (e) => { this.gridCellUnits = Math.max(0.01, parseFloat(e.target.value) || 1); this.render(); persist(); });
         if (calibrateBtn) calibrateBtn.addEventListener('click', () => this.beginCalibration());
@@ -109,6 +107,23 @@ class SpaghettiDiagramApp {
         document.getElementById('flipH').addEventListener('click', () => this.flipBackground('h'));
         document.getElementById('flipV').addEventListener('click', () => this.flipBackground('v'));
         document.getElementById('resetOrientation').addEventListener('click', () => this.resetBackgroundTransform());
+        
+        // Zoom controls
+        this.zoom = this.zoom || 1;
+        const zoomInBtn = document.getElementById('zoomIn');
+        const zoomOutBtn = document.getElementById('zoomOut');
+        const resetZoomBtn = document.getElementById('resetZoom');
+        const applyZoom = (zf) => { this.zoom = Math.max(0.25, Math.min(4, zf)); this.render(); this.saveScaleToStorage(); };
+        if (zoomInBtn) zoomInBtn.addEventListener('click', () => applyZoom(this.zoom * 1.2));
+        if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => applyZoom(this.zoom / 1.2));
+        if (resetZoomBtn) resetZoomBtn.addEventListener('click', () => applyZoom(1));
+        
+        // Mouse wheel zoom (Ctrl+wheel)
+        this.canvas.addEventListener('wheel', (ev) => {
+            if (!ev.ctrlKey) return; ev.preventDefault();
+            const delta = ev.deltaY; const factor = delta > 0 ? 1/1.1 : 1.1; applyZoom(this.zoom * factor);
+        }, { passive: false });
+        
         
         // Action buttons
         document.getElementById('clearAll').addEventListener('click', this.clearAll.bind(this));
@@ -360,10 +375,10 @@ class SpaghettiDiagramApp {
     
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
-        return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
+        // Account for zoom
+        const x = (e.clientX - rect.left) / (this.zoom || 1);
+        const y = (e.clientY - rect.top) / (this.zoom || 1);
+        return { x, y };
     }
     
     handleMouseDown(e) {
@@ -992,6 +1007,10 @@ class SpaghettiDiagramApp {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
         // Draw background (image or rendered PDF) with orientation transforms
+        // Apply zoom for all rendering
+        this.ctx.save();
+        this.ctx.scale(this.zoom || 1, this.zoom || 1);
+        
         const bgSource = this.backgroundPdfPageCanvas || this.backgroundImage;
         if (bgSource) {
             this.drawBackgroundWithTransform(bgSource);
@@ -1049,6 +1068,9 @@ class SpaghettiDiagramApp {
         if (this.selectedPath) {
             this.drawPathEndpointHandles(this.selectedPath);
         }
+        
+        // Restore zoom transform
+        this.ctx.restore();
     }
 
     drawBackgroundWithTransform(source) {
@@ -1342,7 +1364,8 @@ class SpaghettiDiagramApp {
                 units: this.units,
                 unitsPerPixel: this.unitsPerPixel,
                 stepsPerUnit: this.stepsPerUnit,
-                gridCellUnits: this.gridCellUnits
+                gridCellUnits: this.gridCellUnits,
+                zoom: this.zoom || 1
             };
             localStorage.setItem('spaghetti.scale', JSON.stringify(payload));
         } catch (_) {}
@@ -1358,6 +1381,7 @@ class SpaghettiDiagramApp {
                     if (typeof data.unitsPerPixel === 'number') this.unitsPerPixel = data.unitsPerPixel;
                     if (typeof data.stepsPerUnit === 'number') this.stepsPerUnit = data.stepsPerUnit;
                     if (typeof data.gridCellUnits === 'number') this.gridCellUnits = data.gridCellUnits;
+                    if (typeof data.zoom === 'number') this.zoom = data.zoom;
                 }
             }
         } catch (_) {}
@@ -1744,7 +1768,8 @@ class SpaghettiDiagramApp {
                 units: this.units,
                 unitsPerPixel: this.unitsPerPixel,
                 stepsPerUnit: this.stepsPerUnit,
-                gridCellUnits: this.gridCellUnits
+                gridCellUnits: this.gridCellUnits,
+                zoom: this.zoom || 1
             },
             timestamp: new Date().toISOString()
         };
