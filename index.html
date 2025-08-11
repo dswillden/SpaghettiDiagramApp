@@ -15,14 +15,16 @@
                 <div class="header-actions">
                     <input type="file" id="backgroundUpload" accept="image/*,.pdf,application/pdf" class="sr-only">
                     <label for="backgroundUpload" class="btn btn--primary">Upload Background (Image/PDF)</label>
-                    	<div class="btn-group" aria-label="Background Orientation Controls">
+                    <!-- Added Help button -->
+                    <button id="openHelp" class="btn btn--outline" title="Help & Shortcuts (?)" aria-haspopup="dialog">Help / ?</button>
+                    <div class="btn-group" aria-label="Background Orientation Controls">
                         <button id="rotateLeft" class="btn btn--secondary" title="Rotate Left 90°">⟲</button>
                         <button id="rotateRight" class="btn btn--secondary" title="Rotate Right 90°">⟳</button>
                         <button id="flipH" class="btn btn--secondary" title="Flip Horizontal">⇆</button>
                         <button id="flipV" class="btn btn--secondary" title="Flip Vertical">⇅</button>
                         <button id="resetOrientation" class="btn btn--outline" title="Reset Orientation">Reset</button>
                     </div>
-                    	<div class="btn-group" aria-label="Zoom Controls">
+                    <div class="btn-group" aria-label="Zoom Controls">
                         <button id="zoomOut" class="btn btn--secondary" title="Zoom Out">−</button>
                         <button id="zoomIn" class="btn btn--secondary" title="Zoom In">+</button>
                         <button id="resetZoom" class="btn btn--outline" title="Reset Zoom">100%</button>
@@ -40,32 +42,33 @@
                 <div class="sidebar-section">
                     <h3>Tools</h3>
                     <div class="tool-buttons">
-                        <button id="selectTool" class="tool-btn active" data-tool="select">
+                        <button id="selectTool" class="tool-btn active" data-tool="select" data-shortcut="S" title="Select (S)" aria-pressed="true">
                             <span class="tool-icon">↖</span>
                             Select
                         </button>
-                        <button id="pathTool" class="tool-btn" data-tool="path">
+                        <button id="pathTool" class="tool-btn" data-tool="path" data-shortcut="P" title="Draw Path (P)" aria-pressed="false">
                             <span class="tool-icon">✏</span>
                             Draw Path
                         </button>
-                        <button id="deleteTool" class="tool-btn" data-tool="delete">
+                        <button id="deleteTool" class="tool-btn" data-tool="delete" data-shortcut="D" title="Delete Item (D)" aria-pressed="false">
                             <span class="tool-icon">🗑️</span>
                             Delete Item
                         </button>
-                        <button id="obstacleTool" class="tool-btn" data-tool="obstacle">
+                        <button id="obstacleTool" class="tool-btn" data-tool="obstacle" data-shortcut="O" title="Add Obstacle (O)" aria-pressed="false">
                             <span class="tool-icon">⚠</span>
                             Add Obstacle
                         </button>
                     </div>
                 </div>
-
-                <div class="sidebar-section">
+                
+                <div class="sidebar-section" id="objectsSection">
                     <h3>Objects</h3>
-                    <div class="object-palette" id="objectPalette">
-                        <!-- Objects will be populated by JavaScript -->
+                    <div id="objectPalette" class="object-palette">
+                        <!-- Object templates will be populated here -->
+                        <div class="empty-state">No objects yet — click items to add them.</div>
                     </div>
                 </div>
-
+                
                 <div class="sidebar-section" id="scaleSection">
                     <h3>Scale</h3>
                     <div class="form-group">
@@ -135,17 +138,19 @@
                     <div class="canvas-overlay" id="canvasOverlay"></div>
                 </div>
                 <div class="canvas-info">
+                    <!-- Active tool indicator added -->
+                    <span id="activeToolIndicator" aria-live="polite">Active Tool: Select (S)</span> •
                     <span id="canvasInfo">Click and drag to interact with objects. Use tools from the sidebar.</span>
                 </div>
             </main>
         </div>
 
         <!-- Path Metadata Modal -->
-        <div class="modal hidden" id="pathModal">
+        <div class="modal hidden" id="pathModal" role="dialog" aria-modal="true" aria-labelledby="pathModalTitle">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Path Details</h3>
-                    <button class="modal-close" id="closePathModal">&times;</button>
+                    <h3 id="pathModalTitle">Path Details</h3>
+                    <button class="modal-close" id="closePathModal" aria-label="Close Path Details">&times;</button>
                 </div>
                 <div class="modal-body">
                     <form id="pathForm">
@@ -180,11 +185,11 @@
         </div>
 
         <!-- Object Details Modal -->
-        <div class="modal hidden" id="objectModal">
+        <div class="modal hidden" id="objectModal" role="dialog" aria-modal="true" aria-labelledby="objectModalTitle">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Object Details</h3>
-                    <button class="modal-close" id="closeObjectModal">&times;</button>
+                    <h3 id="objectModalTitle">Object Details</h3>
+                    <button class="modal-close" id="closeObjectModal" aria-label="Close Object Details">&times;</button>
                 </div>
                 <div class="modal-body">
                     <form id="objectForm">
@@ -208,17 +213,17 @@
         </div>
 
         <!-- Loading Overlay -->
-        <div class="loading-overlay hidden" id="loadingOverlay">
-            <div class="loading-spinner"></div>
+        <div class="loading-overlay hidden" id="loadingOverlay" aria-live="polite" aria-busy="false">
+            <div class="loading-spinner" role="status" aria-label="Loading"></div>
             <div class="loading-text">Processing...</div>
         </div>
 
         <!-- Calibration Modal -->
-        <div class="modal hidden" id="calibrateModal">
+        <div class="modal hidden" id="calibrateModal" role="dialog" aria-modal="true" aria-labelledby="calibrateModalTitle">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Set Scale</h3>
-                    <button class="modal-close" id="closeCalibrateModal">&times;</button>
+                    <h3 id="calibrateModalTitle">Set Scale</h3>
+                    <button class="modal-close" id="closeCalibrateModal" aria-label="Close Calibration">&times;</button>
                 </div>
                 <div class="modal-body">
                     <p id="calibrateInfo">Measured pixel distance: 0 px</p>
@@ -234,64 +239,70 @@
                 </div>
             </div>
         </div>
+
+        <!-- Help / Shortcuts Modal -->
+        <div class="modal hidden" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+            <div class="modal-content" style="max-width:600px">
+                <div class="modal-header">
+                    <h3 id="helpModalTitle">Help & Shortcuts</h3>
+                    <button class="modal-close" id="closeHelpModal" aria-label="Close Help">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Quick Start:</strong></p>
+                    <ol>
+                        <li>Upload a background image or PDF.</li>
+                        <li>Calibrate scale (optional but recommended).</li>
+                        <li>Add objects from the palette.</li>
+                        <li>Draw paths between objects.</li>
+                        <li>View analytics & export data.</li>
+                    </ol>
+                    <hr>
+                    <p><strong>Keyboard Shortcuts:</strong></p>
+                    <ul style="columns:2; list-style:none; padding:0; margin:0; font-size:14px;">
+                        <li><kbd>S</kbd> Select Tool</li>
+                        <li><kbd>P</kbd> Path Tool</li>
+                        <li><kbd>O</kbd> Obstacle Tool</li>
+                        <li><kbd>D</kbd> Delete Tool</li>
+                        <li><kbd>Esc</kbd> Cancel drawing / close modal</li>
+                        <li><kbd>?</kbd> Toggle Help</li>
+                        <li><kbd>Del</kbd> Delete selected object</li>
+                        <li><kbd>Ctrl/Cmd + Wheel</kbd> Zoom (if supported)</li>
+                    </ul>
+                    <hr>
+                    <p><strong>Tips:</strong> Double‑click an object in Select mode to edit. Use Delete tool for safer deletions with confirmation.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn--primary" id="closeHelpFooter">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    	<script>
-        (function(){
-          function loadScript(src){
-            return new Promise(function(resolve, reject){
-              var s = document.createElement('script');
-              s.src = src;
-              s.async = true;
-              s.onload = function(){ resolve(src); };
-              s.onerror = function(){ reject(new Error('Failed to load ' + src)); };
-              document.head.appendChild(s);
-            });
-          }
-          async function setWorker(base){
-            if (!window.pdfjsLib) return;
-            try {
-              if (base === 'local') {
-                // Try local worker path
-                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdfjs/pdf.worker.min.js';
-                return;
-              }
-              // Try to fetch worker JS and create a blob URL so it works even from file:// or with CORS limits
-              var workerUrl = base + '/pdf.worker.min.js';
-              var resp = await fetch(workerUrl);
-              if (resp.ok) {
-                var code = await resp.text();
-                var blob = new Blob([code], { type: 'application/javascript' });
-                var blobUrl = URL.createObjectURL(blob);
-                window.pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
-                window.__pdfjsWorkerBlob = blobUrl; // keep reference for debugging
-                return;
-              }
-              // Fallback: directly set URL (may fail on some setups)
-              window.pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-            } catch (err) {
-              // Last resort: set to CDN jsDelivr worker
-              window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-            }
-          }
-          (async function(){
-            var tried = [];
-            var sources = [
-              {label: 'local', url: 'libs/pdfjs/pdf.min.js', base: 'local'},
-              {label: 'cdnjs', url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', base: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174'},
-              {label: 'unpkg', url: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js', base: 'https://unpkg.com/pdfjs-dist@3.11.174/build'},
-              {label: 'jsdelivr', url: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', base: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build'}
-            ];
-            for (var i=0;i<sources.length;i++){
-              var src = sources[i];
-              try{
-                await loadScript(src.url);
-                if (window.pdfjsLib){ await setWorker(src.base); break; }
-              }catch(e){ tried.push(src.label); }
-            }
-            // Optional: expose which sources failed for debugging
-            window.__pdfjsTried = tried;
-          })();
-        })();
-      </script>
-      <script src="app.js"></script>
+    <!-- Simplified PDF.js static includes for reliability -->
+    <script src="libs/pdfjs/pdf.min.js"></script>
+    <script>
+      console.log('[PDF Init] Checking PDF.js availability...');
+      if (window.pdfjsLib) {
+        console.log('[PDF Init] pdfjsLib found:', pdfjsLib.version);
+        try { 
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdfjs/pdf.worker.min.js'; 
+          console.log('[PDF Init] Worker source set successfully');
+        } catch (e) { 
+          console.warn('[PDF Init] Failed to set PDF worker src', e); 
+        }
+      } else {
+        console.error('[PDF Init] pdfjsLib not loaded. Check if libs/pdfjs/pdf.min.js is accessible.');
+      }
+      
+      // Test if files are accessible
+      console.log('[PDF Init] Testing file accessibility...');
+      fetch('libs/pdfjs/pdf.min.js', { method: 'HEAD' })
+        .then(response => console.log('[PDF Init] pdf.min.js accessible:', response.ok))
+        .catch(e => console.error('[PDF Init] pdf.min.js not accessible:', e));
+      fetch('libs/pdfjs/pdf.worker.min.js', { method: 'HEAD' })
+        .then(response => console.log('[PDF Init] pdf.worker.min.js accessible:', response.ok))
+        .catch(e => console.error('[PDF Init] pdf.worker.min.js not accessible:', e));
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>

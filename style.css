@@ -752,27 +752,47 @@ select.form-control {
   padding: var(--space-16);
 }
 
+/* Improved responsive header layout */
 .header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: var(--container-xl);
-  margin: 0 auto;
-}
-
-.header-content h1 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-bold);
-}
-
-.header-actions {
-  display: flex;
+  display: flex; /* added flex to enable wrapping */
+  /* allow wrapping so buttons move to second line on narrower screens */
+  flex-wrap: wrap;
   gap: var(--space-12);
-  align-items: center;
+}
+.header-content h1 {
+  flex: 1 1 100%;
+  /* add bottom spacing when actions wrap below */
+  margin-bottom: var(--space-4);
+}
+.header-actions {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  align-items: stretch;
+}
+.header-actions > label,
+.header-actions > button,
+.header-actions .btn-group { flex: 0 0 auto; }
+.header-actions .btn-group { display: inline-flex; gap: var(--space-4); }
+
+/* Compact buttons inside header */
+.header-actions .btn,
+.header-actions label.btn { padding: 6px 12px; font-size: 13px; }
+.header-actions .btn-group .btn { padding: 6px 10px; }
+
+/* Break large clusters into rows sooner */
+@media (min-width: 1100px) {
+  .header-content h1 { flex: 0 0 auto; margin-bottom: 0; }
+  .header-actions { flex: 1 1 auto; justify-content: flex-end; }
 }
 
+/* Improve visual grouping */
+.header-actions .btn-group { background: var(--color-secondary); padding: 4px; border-radius: var(--radius-base); }
+.header-actions .btn-group .btn { background: transparent; }
+.header-actions .btn-group .btn:hover { background: var(--color-secondary-hover); }
+
+/* ...existing code... */
 .app-body {
   display: flex;
   flex: 1;
@@ -955,6 +975,7 @@ select.form-control {
 }
 
 #workspaceCanvas {
+  pointer-events: auto;
   border: 2px solid var(--color-border);
   border-radius: var(--radius-base);
   background: white;
@@ -1190,6 +1211,9 @@ select.form-control {
   font-weight: var(--font-weight-medium);
 }
 
+/* Toast Notifications */
+#toastContainer .toast { display: block; }
+
 /* Responsive Design */
 @media (max-width: 1024px) {
   .sidebar {
@@ -1340,3 +1364,13 @@ select.form-control {
   25% { transform: translateX(-5px); }
   75% { transform: translateX(5px); }
 }
+
+/* Ensure loading overlay sits above everything else */
+.loading-overlay { z-index: 4000; }
+
+.canvas-wrapper { position: relative; }
+.canvas-wrapper canvas { position: relative; z-index: 1; }
+.canvas-wrapper .canvas-overlay { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+
+/* Toast Notifications */
+#toastContainer .toast { display: block; }
