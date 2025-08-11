@@ -102,7 +102,6 @@ class SpaghettiDiagramApp {
         // No deferred reset; only fit when background arrives
         this.setTool('select');
         
-        console.log('[Init] App ready (no deferred reset).');
     }
     
     setLoading(isLoading, message) {
@@ -294,6 +293,11 @@ class SpaghettiDiagramApp {
         document.getElementById('deleteObject').addEventListener('click', this.deleteSelectedObject.bind(this));
         document.getElementById('objectForm').addEventListener('submit', this.updateObjectMetadata.bind(this));
         
+        // Delete Confirmation Modal
+        document.getElementById('closeDeleteModal').addEventListener('click', this.closeDeleteModal.bind(this));
+        document.getElementById('cancelDelete').addEventListener('click', this.closeDeleteModal.bind(this));
+        document.getElementById('confirmDelete').addEventListener('click', this.confirmDelete.bind(this));
+        
         // Calibration modal
         const calibModal = document.getElementById('calibrateModal');
         const closeCalib = document.getElementById('closeCalibrateModal');
@@ -312,6 +316,9 @@ class SpaghettiDiagramApp {
         });
         document.getElementById('objectModal').addEventListener('click', (e) => {
             if (e.target.classList.contains('modal')) this.closeObjectModal();
+        });
+        document.getElementById('deleteModal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) this.closeDeleteModal();
         });
         
         // Close modals on Escape key and handle Delete key + global shortcuts
@@ -761,7 +768,7 @@ class SpaghettiDiagramApp {
     }
     
     handleSelectMouseDown() {
-        // Check for resize handles first
+        // Check for resize handles first (on currently selected object)
         if (this.selectedObject) {
             const handle = this.getResizeHandle(this.mousePos, this.selectedObject);
             if (handle) {
@@ -782,12 +789,20 @@ class SpaghettiDiagramApp {
             return;
         }
         
-        // Check for object selection
+        // Check for object selection and possibly begin resize on that object
         const clickedObject = this.getObjectAt(this.mousePos);
         if (clickedObject) {
+            // NEW: if clicking near a handle on the clicked object, start resizing immediately
+            const clickedHandle = this.getResizeHandle(this.mousePos, clickedObject);
             this.selectedObject = clickedObject;
             this.selectedPath = null;
             this.selectedEndpoint = null;
+            if (clickedHandle) {
+                this.isResizing = true;
+                this.resizeHandle = clickedHandle;
+                return;
+            }
+            // Otherwise begin dragging the object
             this.isDragging = true;
         } else {
             this.selectedObject = null;
@@ -901,9 +916,33 @@ class SpaghettiDiagramApp {
             
             this.dragStart = { ...this.mousePos };
             this.render();
+        } else {
+            // Update cursor based on what's under the mouse
+            const hoveredObject = this.getObjectAt(this.mousePos) || this.selectedObject;
+            const handle = hoveredObject ? this.getResizeHandle(this.mousePos, hoveredObject) : null;
+            if (handle) {
+                // Map to standard CSS cursor names
+                const cursorMap = {
+                    'nw': 'nwse-resize',
+                    'se': 'nwse-resize',
+                    'ne': 'nesw-resize',
+                    'sw': 'nesw-resize',
+                    'n': 'ns-resize',
+                    's': 'ns-resize',
+                    'w': 'ew-resize',
+                    'e': 'ew-resize'
+                };
+                this.canvas.style.cursor = cursorMap[handle] || 'default';
+            } else if (this.getObjectAt(this.mousePos)) {
+                this.canvas.style.cursor = 'move';
+            } else if (this.getPathEndpointAt(this.mousePos)) {
+                this.canvas.style.cursor = 'pointer';
+            } else {
+                this.canvas.style.cursor = 'default';
+            }
         }
     }
-    
+
     handlePathMouseMove() {
         if (this.currentPath.length > 0) {
             // Add point if moved enough distance
@@ -976,6 +1015,7 @@ class SpaghettiDiagramApp {
         this.isResizing = false;
         this.isDraggingEndpoint = false;
         this.resizeHandle = null;
+        this.canvas.style.cursor = 'default'; // Reset cursor on mouse up
     }
     
     handleDoubleClick(e) {
@@ -1147,16 +1187,8 @@ class SpaghettiDiagramApp {
     deleteSelectedObject() {
         if (!this.selectedObject) return;
         
-        if (confirm(`Delete "${this.selectedObject.name}"? This action cannot be undone.`)) {
-            const index = this.objects.indexOf(this.selectedObject);
-            if (index > -1) {
-                this.objects.splice(index, 1);
-                this.selectedObject = null;
-                this.closeObjectModal();
-                this.updateAnalytics();
-                this.render();
-            }
-        }
+        this.showDeleteConfirmation(this.selectedObject, 'object');
+        this.closeObjectModal(); // Close the object properties modal
     }
     
     getObjectAt(point) {
@@ -1183,14 +1215,18 @@ class SpaghettiDiagramApp {
     }
 
     getResizeHandle(point, obj) {
-        const tolerance = 8;
+        const tolerance = 8 / (this.zoom || 1); // Make handle hit area larger when zoomed out
         const handles = {
             'nw': { x: obj.x, y: obj.y },
             'ne': { x: obj.x + obj.width, y: obj.y },
             'sw': { x: obj.x, y: obj.y + obj.height },
-            'se': { x: obj.x + obj.width, y: obj.y + obj.height }
+            'se': { x: obj.x + obj.width, y: obj.y + obj.height },
+            'n': { x: obj.x + obj.width / 2, y: obj.y },
+            's': { x: obj.x + obj.width / 2, y: obj.y + obj.height },
+            'w': { x: obj.x, y: obj.y + obj.height / 2 },
+            'e': { x: obj.x + obj.width, y: obj.y + obj.height / 2 }
         };
-        
+
         for (const [handle, pos] of Object.entries(handles)) {
             if (Math.abs(point.x - pos.x) <= tolerance && Math.abs(point.y - pos.y) <= tolerance) {
                 return handle;
@@ -1368,29 +1404,12 @@ class SpaghettiDiagramApp {
     render() {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
         // Apply pan (in screen pixels) then zoom for all rendering
         this.ctx.save();
         this.ctx.translate(this.pan.x, this.pan.y);
         this.ctx.scale(this.zoom || 1, this.zoom || 1);
-        
-        console.log('[Render] Current view state:', { 
-            zoom: this.zoom, 
-            pan: this.pan, 
-            canvasSize: { width: this.canvas.width, height: this.canvas.height }
-        });
-        
         const bgSource = this.backgroundPdfPageCanvas || this.backgroundImage;
         if (bgSource) {
-            console.log('[Render] Drawing background:', { 
-                type: this.backgroundPdfPageCanvas ? 'PDF' : 'Image',
-                width: bgSource.width, 
-                height: bgSource.height,
-                canvasWidth: this.canvas.width,
-                canvasHeight: this.canvas.height,
-                zoom: this.zoom,
-                pan: this.pan
-            });
             this.drawBackgroundWithTransform(bgSource);
             
             // Add visual confirmation in canvas info
@@ -1400,7 +1419,6 @@ class SpaghettiDiagramApp {
                 infoEl.textContent = `Background loaded: ${bgType}. ${infoEl.textContent}`;
             }
         } else {
-            console.log('[Render] No background source available');
             // Remove background indicator if no background
             const infoEl = document.getElementById('canvasInfo');
             if (infoEl && infoEl.textContent.includes('Background loaded')) {
@@ -1465,14 +1483,6 @@ class SpaghettiDiagramApp {
         // Draw path endpoint handles if a path is selected
         if (this.selectedPath) {
             this.drawPathEndpointHandles(this.selectedPath);
-        }
-        
-        // Draw delete hover highlight inside transformed space so it aligns with pan/zoom
-        if (this.currentTool === 'delete' && this.deleteHighlight && this.deleteHighlight.item) {
-            const { item, type } = this.deleteHighlight;
-            if (type === 'object') this.drawDeleteHighlight(item);
-            else if (type === 'path') this.drawPathDeleteHighlight(item);
-            else if (type === 'obstacle') this.drawObstacleDeleteHighlight(item);
         }
         
         // Restore zoom transform
@@ -1577,16 +1587,16 @@ class SpaghettiDiagramApp {
     }
 
     drawSelectionHandles(obj) {
-        const handleSize = 8;
+        const handleSize = 8 / (this.zoom || 1);
         this.ctx.strokeStyle = '#007bff';
-        this.ctx.lineWidth = 1;
-        this.ctx.setLineDash([5, 5]);
+        this.ctx.lineWidth = 1 / (this.zoom || 1);
+        this.ctx.setLineDash([5 / (this.zoom || 1), 5 / (this.zoom || 1)]);
         this.ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
         this.ctx.setLineDash([]);
 
         this.ctx.fillStyle = '#FFF';
         this.ctx.strokeStyle = '#007bff';
-        
+
         const handles = this.getResizeHandles(obj);
         for (const handle in handles) {
             const pos = handles[handle];
@@ -1601,6 +1611,10 @@ class SpaghettiDiagramApp {
             'ne': { x: obj.x + obj.width, y: obj.y },
             'sw': { x: obj.x, y: obj.y + obj.height },
             'se': { x: obj.x + obj.width, y: obj.y + obj.height },
+            'n': { x: obj.x + obj.width / 2, y: obj.y },
+            's': { x: obj.x + obj.width / 2, y: obj.y + obj.height },
+            'w': { x: obj.x, y: obj.y + obj.height / 2 },
+            'e': { x: obj.x + obj.width, y: obj.y + obj.height / 2 }
         };
     }
     
@@ -2115,19 +2129,20 @@ class SpaghettiDiagramApp {
             this.showInfoMessage('Nothing to clear!', 'info');
             return;
         }
-        
-        if (confirm('Clear all objects, paths, and obstacles? This action cannot be undone.')) {
-            this.objects = [];
-            this.paths = [];
-            this.obstacles = [];
-            this.selectedObject = null;
-            this.selectedPath = null;
-            this.currentPath = [];
-            this.currentObstacle = null;
-            this.updateAnalytics();
-            this.render();
-            this.showInfoMessage('All data cleared successfully.', 'success');
-        }
+        this.showDeleteConfirmation(null, 'all');
+    }
+
+    clearAllData() {
+        this.objects = [];
+        this.paths = [];
+        this.obstacles = [];
+        this.selectedObject = null;
+        this.selectedPath = null;
+        this.currentPath = [];
+        this.currentObstacle = null;
+        this.updateAnalytics();
+        this.render();
+        this.showInfoMessage('All data cleared successfully.', 'success');
     }
 
     exportData() {
@@ -2160,35 +2175,90 @@ class SpaghettiDiagramApp {
     }
 
     showDeleteConfirmation(item, type) {
-        const name = item.name || item.description || `${type} ${item.id}`;
-        if (confirm(`Delete ${type}: "${name}"? This action cannot be undone.`)) {
+        this.itemToDelete = { item, type };
+        const modal = document.getElementById('deleteModal');
+        const message = document.getElementById('deleteMessage');
+        const warning = document.getElementById('deleteWarning');
+
+        if (type === 'all') {
+            message.textContent = 'Are you sure you want to clear all objects, paths, and obstacles? This action cannot be undone.';
+            warning.classList.add('hidden');
+        } else {
+            const name = item.name || item.description || `this ${type}`;
+            message.textContent = `Are you sure you want to delete "${name}"? This action cannot be undone.`;
+
             if (type === 'object') {
-                const index = this.objects.indexOf(item);
-                if (index > -1) {
-                    this.objects.splice(index, 1);
-                    if (this.selectedObject === item) this.selectedObject = null;
+                // Check for connected paths
+                const connectedPaths = this.paths.filter(path => {
+                    const startObj = this.getObjectAt(path.points[0]);
+                    const endObj = this.getObjectAt(path.points[path.points.length - 1]);
+                    return startObj === item || endObj === item;
+                });
+                if (connectedPaths.length > 0) {
+                    warning.textContent = `Warning: Deleting this object will also remove ${connectedPaths.length} connected path(s).`;
+                    warning.classList.remove('hidden');
+                } else {
+                    warning.classList.add('hidden');
                 }
-            } else if (type === 'path') {
-                const index = this.paths.indexOf(item);
-                if (index > -1) {
-                    this.paths.splice(index, 1);
-                    if (this.selectedPath === item) this.selectedPath = null;
-                }
-            } else if (type === 'obstacle') {
-                const index = this.obstacles.indexOf(item);
-                if (index > -1) {
-                    this.obstacles.splice(index, 1);
-                }
+            } else {
+                warning.classList.add('hidden');
             }
-            this.updateAnalytics();
-            this.render();
-            this.showInfoMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully.`, 'success');
         }
+
+        modal.classList.remove('hidden');
+        // Focus the confirm button for accessibility
+        const confirmBtn = document.getElementById('confirmDelete');
+        if (confirmBtn) confirmBtn.focus();
+    }
+
+    confirmDelete() {
+        if (!this.itemToDelete) return;
+
+        const { item, type } = this.itemToDelete;
+
+        if (type === 'all') {
+            this.clearAllData();
+            this.closeDeleteModal();
+            return;
+        }
+
+        if (type === 'object') {
+            const index = this.objects.indexOf(item);
+            if (index > -1) {
+                this.objects.splice(index, 1);
+                // Also delete paths connected to this object
+                this.paths = this.paths.filter(path => {
+                    const startObj = this.getObjectAt(path.points[0]);
+                    const endObj = this.getObjectAt(path.points[path.points.length - 1]);
+                    return startObj !== item && endObj !== item;
+                });
+                if (this.selectedObject === item) this.selectedObject = null;
+            }
+        } else if (type === 'path') {
+            const index = this.paths.indexOf(item);
+            if (index > -1) {
+                this.paths.splice(index, 1);
+                if (this.selectedPath === item) this.selectedPath = null;
+            }
+        } else if (type === 'obstacle') {
+            const index = this.obstacles.indexOf(item);
+            if (index > -1) {
+                this.obstacles.splice(index, 1);
+            }
+        }
+
+        this.updateAnalytics();
+        this.render();
+        this.showInfoMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully.`, 'success');
+        this.closeDeleteModal();
     }
 
     closeDeleteModal() {
-        // This method is called but there's no delete modal in the HTML
-        // Just ensure any delete state is cleared
+        const modal = document.getElementById('deleteModal');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+        this.itemToDelete = null;
         this.hoveredDeleteItem = null;
         this.deleteHighlight = null;
         this.hideDeleteTooltip();
