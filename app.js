@@ -204,12 +204,12 @@ class SpaghettiDiagramApp {
         // File upload (image or PDF)
         document.getElementById('backgroundUpload').addEventListener('change', this.handleBackgroundUpload.bind(this));
         
-        // Background orientation controls
-        document.getElementById('rotateLeft').addEventListener('click', () => this.rotateBackground(-90));
-        document.getElementById('rotateRight').addEventListener('click', () => this.rotateBackground(90));
-        document.getElementById('flipH').addEventListener('click', () => this.flipBackground('h'));
-        document.getElementById('flipV').addEventListener('click', () => this.flipBackground('v'));
-        document.getElementById('resetOrientation').addEventListener('click', () => this.resetBackgroundTransform());
+        // Background orientation controls (removed direct individual listeners to avoid double calls; now handled by delegated click handler below)
+        // document.getElementById('rotateLeft').addEventListener('click', () => this.rotateBackground(-90));
+        // document.getElementById('rotateRight').addEventListener('click', () => this.rotateBackground(90));
+        // document.getElementById('flipH').addEventListener('click', () => this.flipBackground('h'));
+        // document.getElementById('flipV').addEventListener('click', () => this.flipBackground('v'));
+        // document.getElementById('resetOrientation').addEventListener('click', () => this.resetBackgroundTransform());
         
         // Zoom controls (refactored to use setZoom with anchor centering)
         this.zoom = this.zoom || 1;
@@ -1508,6 +1508,8 @@ class SpaghettiDiagramApp {
     }
     
     drawGrid() {
+        // Grid is rendered AFTER background (in render()) so it visually overlays the image/PDF.
+        // It does NOT rotate with the background; rotation applies only to the background image so the grid remains a stable reference layer.
         // Determine pixel spacing from real unit per cell if scale is set
         let gridSizePx = 20;
         if (this.unitsPerPixel > 0 && this.gridCellUnits > 0) {
@@ -2054,8 +2056,11 @@ class SpaghettiDiagramApp {
 
     // Background transformation methods
     rotateBackground(degrees) {
-        this.backgroundTransform.rotation += degrees;
-        this.backgroundTransform.rotation = this.backgroundTransform.rotation % 360;
+        // Normalize to quarter turns and prevent double-trigger issues.
+        // If a UI event accidentally fires twice quickly, collapse to a single 90° step.
+        const step = degrees > 0 ? 90 : -90; // enforce 90° increments
+        this.backgroundTransform.rotation = (this.backgroundTransform.rotation + step) % 360;
+        if (this.backgroundTransform.rotation < 0) this.backgroundTransform.rotation += 360;
         this.render();
     }
 
