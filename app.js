@@ -64,6 +64,10 @@ class SpaghettiDiagramApp {
         const params = new URLSearchParams(window.location.search || '');
         this.debug = params.get('debug') === '1';
         
+        // Auto path state
+        this._autoPathStart = null;
+        this._autoPathEnd = null;
+        
         this.init();
     }
     
@@ -282,6 +286,56 @@ class SpaghettiDiagramApp {
         if (helpModal) helpModal.addEventListener('click', (e) => { if (e.target === helpModal) this.closeHelpModal(); });
 
         // Global keyboard shortcuts (tools, help, etc.) added in modal setup for consolidation
+        document.addEventListener('keydown', (e) => {
+            const target = e.target;
+            const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+            const helpModal = document.getElementById('helpModal');
+            const helpOpen = helpModal && !helpModal.classList.contains('hidden');
+            const anyOtherModalOpen = ['pathModal','objectModal','calibrateModal','deleteModal'].some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+            
+            // Tool shortcuts (ignore while typing inside form fields or when other modals are open)
+            if (!isTyping && !anyOtherModalOpen) {
+                if (['s','S'].includes(e.key)) { this.setTool('select'); }
+                else if (['p','P'].includes(e.key)) { this.setTool('path'); }
+                else if (['z','Z'].includes(e.key)) { this.setTool('zone'); }
+                else if (['o','O'].includes(e.key)) { this.setTool('obstacle'); }
+                else if (['a','A'].includes(e.key)) { this.setTool('autoPath'); }
+                else if (['d','D'].includes(e.key)) { this.setTool('delete'); }
+                else if (e.key === '?') { // Toggle help
+                    e.preventDefault();
+                    if (helpOpen) this.closeHelpModal(); else this.openHelpModal();
+                    return;
+                }
+            }
+
+            if (e.key === 'Escape') {
+                // If help open, close and return
+                if (helpOpen) { this.closeHelpModal(); return; }
+                // Cancel drawing first if applicable
+                if (this.isDrawing) {
+                    this.isDrawing = false;
+                    this.currentPath = [];
+                    this.currentObstacle = null;
+                    this.render();
+                }
+                // Existing modal closures
+                this.closePathModal();
+                this.closeObjectModal();
+                this.closeDeleteModal();
+                this.closeCalibrateModal();
+            } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
+                if (this.selectedObject) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(this.selectedObject, 'object');
+                } else if (this.selectedZone) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(this.selectedZone, 'zone');
+                } else if (this.selectedObstacle) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(this.selectedObstacle, 'obstacle');
+                }
+            }
+        });
     }
     
     setupModalEvents() {
@@ -343,7 +397,9 @@ class SpaghettiDiagramApp {
             if (!isTyping && !anyOtherModalOpen) {
                 if (['s','S'].includes(e.key)) { this.setTool('select'); }
                 else if (['p','P'].includes(e.key)) { this.setTool('path'); }
+                else if (['z','Z'].includes(e.key)) { this.setTool('zone'); }
                 else if (['o','O'].includes(e.key)) { this.setTool('obstacle'); }
+                else if (['a','A'].includes(e.key)) { this.setTool('autoPath'); }
                 else if (['d','D'].includes(e.key)) { this.setTool('delete'); }
                 else if (e.key === '?') { // Toggle help
                     e.preventDefault();
@@ -367,9 +423,17 @@ class SpaghettiDiagramApp {
                 this.closeObjectModal();
                 this.closeDeleteModal();
                 this.closeCalibrateModal();
-            } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedObject && !isTyping) {
-                e.preventDefault();
-                this.showDeleteConfirmation(this.selectedObject, 'object');
+            } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
+                if (this.selectedObject) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(this.selectedObject, 'object');
+                } else if (this.selectedZone) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(this.selectedZone, 'zone');
+                } else if (this.selectedObstacle) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(this.selectedObstacle, 'obstacle');
+                }
             }
         });
     }
@@ -471,16 +535,17 @@ class SpaghettiDiagramApp {
         
         // Update info text
         const infoText = {
-            select: 'Click and drag to move objects. Double-click to edit properties. Press Delete key to delete selected objects.',
+            select: 'Click and drag to move objects and zones. Double-click objects or zones to edit properties. Press Delete key to delete selected items.',
             path: 'Click and drag to draw walking paths between objects.',
             zone: 'Click and drag to draw a rectangular zone (Green or Restricted). Double-click to edit properties.',
             obstacle: 'Click and drag to create obstacle/off-limits zones.',
+            autoPath: 'Select two objects to automatically compute shortest path avoiding obstacles/restricted zones.',
             delete: 'Click on an object, path, zone, or obstacle to delete it. A confirmation dialog will appear.'
         };
         document.getElementById('canvasInfo').textContent = infoText[tool] || 'Select a tool to begin.';
 
         // Active tool indicator (aria-live)
-        const toolKeyMap = { select: 'S', path: 'P', obstacle: 'O', delete: 'D' };
+        const toolKeyMap = { select: 'S', path: 'P', obstacle: 'O', delete: 'D', zone: 'Z', autoPath: 'A' };
         const indicator = document.getElementById('activeToolIndicator');
         if (indicator) indicator.textContent = `Active Tool: ${tool.charAt(0).toUpperCase()+tool.slice(1)} (${toolKeyMap[tool] || ''})`;
         
@@ -760,8 +825,20 @@ class SpaghettiDiagramApp {
             return;
         }
         
-        // Start panning with middle or right mouse, or left-click on empty space in select mode
-        if (e.button === 1 || e.button === 2 || (e.button === 0 && this.currentTool === 'select' && !this.getObjectAt(this.mousePos) && !this.getPathEndpointAt(this.mousePos))) {
+        // Determine hover targets before deciding to pan
+        const hoveredObject = this.getObjectAt(this.mousePos);
+        const hoveredZone = this.getZoneAt(this.mousePos);
+        const hoveredObstacle = this.getObstacleAt(this.mousePos);
+        const endpointInfoPre = this.getPathEndpointAt(this.mousePos);
+        const selectedForHandle = this.selectedObject || this.selectedZone || this.selectedObstacle;
+        const overSelectedHandle = selectedForHandle ? this.getResizeHandle(this.mousePos, selectedForHandle) : null;
+        const anyHover = hoveredObject || hoveredZone || hoveredObstacle;
+        
+        // Start panning with middle/right mouse OR left-click on true empty space (no objects/zones/obstacles/endpoints/resize handles)
+        if (
+            (e.button === 1 || e.button === 2) ||
+            (e.button === 0 && this.currentTool === 'select' && !anyHover && !endpointInfoPre && !overSelectedHandle)
+        ) {
             this.isPanning = true;
             this.lastClientPos = { x: e.clientX, y: e.clientY };
             return;
@@ -775,15 +852,18 @@ class SpaghettiDiagramApp {
             this.handleZoneMouseDown();
         } else if (this.currentTool === 'obstacle') {
             this.handleObstacleMouseDown();
+        } else if (this.currentTool === 'autoPath') {
+            this.handleAutoPathMouseDown();
         } else if (this.currentTool === 'delete') {
             this.handleDeleteMouseDown();
         }
     }
     
     handleSelectMouseDown() {
-        // Check for resize handles first (on currently selected object)
-        if (this.selectedObject) {
-            const handle = this.getResizeHandle(this.mousePos, this.selectedObject);
+        // Unified resize handle check for any currently selected item (object, zone, obstacle)
+        const currentSelected = this.selectedObject || this.selectedZone || this.selectedObstacle;
+        if (currentSelected) {
+            const handle = this.getResizeHandle(this.mousePos, currentSelected);
             if (handle) {
                 this.isResizing = true;
                 this.resizeHandle = handle;
@@ -798,16 +878,18 @@ class SpaghettiDiagramApp {
             this.selectedEndpoint = endpointInfo.endpoint;
             this.isDraggingEndpoint = true;
             this.selectedObject = null;
+            this.selectedZone = null; // clear zone selection when path endpoint selected
             this.render();
             return;
         }
         
-        // Check for object selection and possibly begin resize on that object
+        // Check for object selection first (objects on top)
         const clickedObject = this.getObjectAt(this.mousePos);
         if (clickedObject) {
-            // NEW: if clicking near a handle on the clicked object, start resizing immediately
             const clickedHandle = this.getResizeHandle(this.mousePos, clickedObject);
             this.selectedObject = clickedObject;
+            this.selectedZone = null;
+            this.selectedObstacle = null;
             this.selectedPath = null;
             this.selectedEndpoint = null;
             if (clickedHandle) {
@@ -815,13 +897,53 @@ class SpaghettiDiagramApp {
                 this.resizeHandle = clickedHandle;
                 return;
             }
-            // Otherwise begin dragging the object
             this.isDragging = true;
+            return;
         } else {
-            this.selectedObject = null;
-            this.selectedPath = null;
-            this.selectedEndpoint = null;
+            // Check for zone selection
+            const clickedZone = this.getZoneAt(this.mousePos);
+            if (clickedZone) {
+                const clickedHandle = this.getResizeHandle(this.mousePos, clickedZone);
+                this.selectedZone = clickedZone;
+                this.selectedObject = null;
+                this.selectedObstacle = null;
+                this.selectedPath = null;
+                this.selectedEndpoint = null;
+                if (clickedHandle) {
+                    this.isResizing = true;
+                    this.resizeHandle = clickedHandle;
+                    return;
+                }
+                this.isDragging = true; // start dragging zone
+                this.render();
+                return;
+            }
+            // Check for obstacle selection
+            const clickedObstacle = this.getObstacleAt(this.mousePos);
+            if (clickedObstacle) {
+                const clickedHandle = this.getResizeHandle(this.mousePos, clickedObstacle);
+                this.selectedObstacle = clickedObstacle;
+                this.selectedObject = null;
+                this.selectedZone = null;
+                this.selectedPath = null;
+                this.selectedEndpoint = null;
+                if (clickedHandle) {
+                    this.isResizing = true;
+                    this.resizeHandle = clickedHandle;
+                    return;
+                }
+                this.isDragging = true;
+                this.render();
+                return;
+            }
         }
+        
+        // If no object or zone, clear selections
+        this.selectedObject = null;
+        this.selectedZone = null;
+        this.selectedObstacle = null;
+        this.selectedPath = null;
+        this.selectedEndpoint = null;
         
         this.render();
     }
@@ -937,7 +1059,7 @@ class SpaghettiDiagramApp {
     }
     
     handleSelectMouseMove() {
-        if (this.isResizing && this.selectedObject && this.resizeHandle) {
+        if (this.isResizing && (this.selectedObject || this.selectedZone || this.selectedObstacle) && this.resizeHandle) {
             this.handleResize();
             this.render();
         } else if (this.isDraggingEndpoint && this.selectedPath && this.selectedEndpoint) {
@@ -952,10 +1074,26 @@ class SpaghettiDiagramApp {
             
             this.dragStart = { ...this.mousePos };
             this.render();
+        } else if (this.isDragging && this.selectedZone) {
+            // Dragging a zone
+            const dx = this.mousePos.x - this.dragStart.x;
+            const dy = this.mousePos.y - this.dragStart.y;
+            this.selectedZone.x = Math.max(0, Math.min(this.canvas.width - this.selectedZone.width, this.selectedZone.x + dx));
+            this.selectedZone.y = Math.max(0, Math.min(this.canvas.height - this.selectedZone.height, this.selectedZone.y + dy));
+            this.dragStart = { ...this.mousePos };
+            this.render();
+        } else if (this.isDragging && this.selectedObstacle) {
+            const dx = this.mousePos.x - this.dragStart.x;
+            const dy = this.mousePos.y - this.dragStart.y;
+            this.selectedObstacle.x = Math.max(0, Math.min(this.canvas.width - this.selectedObstacle.width, this.selectedObstacle.x + dx));
+            this.selectedObstacle.y = Math.max(0, Math.min(this.canvas.height - this.selectedObstacle.height, this.selectedObstacle.y + dy));
+            this.dragStart = { ...this.mousePos };
+            this.render();
         } else {
-            // Update cursor based on what's under the mouse
-            const hoveredObject = this.getObjectAt(this.mousePos) || this.selectedObject;
-            const handle = hoveredObject ? this.getResizeHandle(this.mousePos, hoveredObject) : null;
+            // Update cursor
+            const hovered = this.getObjectAt(this.mousePos) || this.getZoneAt(this.mousePos) || this.getObstacleAt(this.mousePos);
+            const handleTarget = hovered || this.selectedObject || this.selectedZone || this.selectedObstacle;
+            const handle = handleTarget ? this.getResizeHandle(this.mousePos, handleTarget) : null;
             if (handle) {
                 // Map to standard CSS cursor names
                 const cursorMap = {
@@ -969,7 +1107,7 @@ class SpaghettiDiagramApp {
                     'e': 'ew-resize'
                 };
                 this.canvas.style.cursor = cursorMap[handle] || 'default';
-            } else if (this.getObjectAt(this.mousePos)) {
+            } else if (hovered) {
                 this.canvas.style.cursor = 'move';
             } else if (this.getPathEndpointAt(this.mousePos)) {
                 this.canvas.style.cursor = 'pointer';
@@ -978,7 +1116,7 @@ class SpaghettiDiagramApp {
             }
         }
     }
-
+    
     handlePathMouseMove() {
         if (this.currentPath.length > 0) {
             // Add point if moved enough distance
@@ -1012,7 +1150,7 @@ class SpaghettiDiagramApp {
     }
     
     handleResize() {
-        const obj = this.selectedObject;
+        const obj = this.selectedObject || this.selectedZone || this.selectedObstacle; // generic target
         const handle = this.resizeHandle;
         const dx = this.mousePos.x - this.dragStart.x;
         const dy = this.mousePos.y - this.dragStart.y;
@@ -1066,13 +1204,14 @@ class SpaghettiDiagramApp {
     
     handleDoubleClick(e) {
         e.preventDefault();
-        
         if (this.currentTool === 'select') {
-            const clickedObject = this.getObjectAt(this.getMousePos(e));
-            if (clickedObject) {
-                this.selectedObject = clickedObject;
-                this.openObjectModal();
-            }
+            const pos = this.getMousePos(e);
+            const clickedObject = this.getObjectAt(pos);
+            if (clickedObject) { this.selectedObject = clickedObject; this.selectedZone = null; this.selectedObstacle = null; this.openObjectModal(); return; }
+            const clickedZone = this.getZoneAt(pos);
+            if (clickedZone) { this.selectedZone = clickedZone; this.selectedObject = null; this.selectedObstacle = null; this.openZoneModal(); return; }
+            const clickedObstacle = this.getObstacleAt(pos);
+            if (clickedObstacle) { this.selectedObstacle = clickedObstacle; this.selectedObject = null; this.selectedZone = null; /* Potential future obstacle modal */ return; }
         }
     }
     
@@ -1595,10 +1734,22 @@ class SpaghettiDiagramApp {
         if (this.selectedObject) {
             this.drawSelectionHandles(this.selectedObject);
         }
+        if (this.selectedZone) {
+            this.drawSelectionHandles(this.selectedZone);
+        }
+        if (this.selectedObstacle) {
+            this.drawSelectionHandles(this.selectedObstacle);
+        }
         
-        // Draw path endpoint handles if a path is selected
-        if (this.selectedPath) {
-            this.drawPathEndpointHandles(this.selectedPath);
+        // Highlight for auto path start
+        if (this.currentTool === 'autoPath' && this._autoPathStart) {
+            const so = this._autoPathStart;
+            this.ctx.save();
+            this.ctx.strokeStyle = '#ff9800';
+            this.ctx.setLineDash([6,3]);
+            this.ctx.lineWidth = 2 / (this.zoom||1);
+            this.ctx.strokeRect(so.x-4, so.y-4, so.width+8, so.height+8);
+            this.ctx.restore();
         }
         
         // Restore zoom transform
@@ -1675,6 +1826,7 @@ class SpaghettiDiagramApp {
     }
 
     drawPath(path) {
+       
         if (path.points.length < 2) return;
         
         this.ctx.beginPath();
@@ -1718,7 +1870,7 @@ class SpaghettiDiagramApp {
         const h = Math.abs(zone.height);
         this.ctx.fillRect(x, y, w, h);
         this.ctx.strokeRect(x, y, w, h);
-        // Label
+               // Label
         if (zone.name) {
             this.ctx.fillStyle = '#000';
             this.ctx.font = '12px Arial';
@@ -2280,7 +2432,9 @@ class SpaghettiDiagramApp {
         this.objects = [];
         this.paths = [];
         this.obstacles = [];
+        this.zones = []; // also clear zones
         this.selectedObject = null;
+        this.selectedZone = null;
         this.selectedPath = null;
         this.currentPath = [];
         this.currentObstacle = null;
@@ -2392,11 +2546,13 @@ class SpaghettiDiagramApp {
             const index = this.zones.indexOf(item);
             if (index > -1) {
                 this.zones.splice(index, 1);
+                if (this.selectedZone === item) this.selectedZone = null;
             }
         } else if (type === 'obstacle') {
             const index = this.obstacles.indexOf(item);
             if (index > -1) {
                 this.obstacles.splice(index, 1);
+                if (this.selectedObstacle === item) this.selectedObstacle = null;
             }
         }
 
