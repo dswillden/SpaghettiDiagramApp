@@ -66,7 +66,8 @@ class SpaghettiDiagramApp {
         
         this.init();
     }
-      init() {
+    
+    init() {
         this.setupEventListeners();
         this.populateObjectPalette();
         this.populateObjectTypeSelect();
@@ -80,8 +81,11 @@ class SpaghettiDiagramApp {
         this.isCalibrating = false;
         this.calibrationPoints = [];
         
-        // CRITICAL FIX: Initialize viewport with proper defaults BEFORE loading from storage
-        this.initializeViewport();
+        // Initialize viewport with proper defaults BEFORE loading from storage
+        this.zoom = 1;
+        this.pan = { x: 0, y: 0 }; // in screen pixels
+        this.isPanning = false;
+        this.lastClientPos = { x: 0, y: 0 };
         
         this.loadScaleFromStorage();
         this.updateScaleUI();
@@ -160,7 +164,8 @@ class SpaghettiDiagramApp {
         }
         return toast;
     }
-      setupEventListeners() {
+    
+    setupEventListeners() {
         // Canvas events
         this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
         this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
@@ -180,7 +185,7 @@ class SpaghettiDiagramApp {
             overlayEl.addEventListener('dragover', allowDrop);
             overlayEl.addEventListener('drop', handleDrop);
         }
-
+        
         // Tool buttons
         document.querySelectorAll('.tool-btn').forEach(btn => {
             btn.addEventListener('click', this.handleToolChange.bind(this));
@@ -257,11 +262,16 @@ class SpaghettiDiagramApp {
         // Modal events
         this.setupModalEvents();
         
-        // Object palette (CRITICAL FIX: Schedule binding after palette is populated)
-        setTimeout(() => {
-            this.bindObjectPaletteEvents();
-        }, 100);
-        
+        // Object palette (guarded in case element is missing)
+        const paletteEl = document.getElementById('objectPalette');
+        if (paletteEl) {
+            paletteEl.addEventListener('click', this.handleObjectPaletteClick.bind(this));
+            // Drag start from palette
+            paletteEl.addEventListener('dragstart', this.handlePaletteDragStart.bind(this));
+        } else {
+            console.warn('[Init] #objectPalette not found at startup. Palette click handler not bound.');
+        }
+
         // Help / Shortcuts modal buttons
         const openHelpBtn = document.getElementById('openHelp');
         const closeHelpBtn = document.getElementById('closeHelpModal');
@@ -280,6 +290,15 @@ class SpaghettiDiagramApp {
         document.getElementById('closePathModal').addEventListener('click', this.closePathModal.bind(this));
         document.getElementById('cancelPath').addEventListener('click', this.closePathModal.bind(this));
         document.getElementById('pathForm').addEventListener('submit', this.savePathMetadata.bind(this));
+        // Explicit save button listener (robust against form submit issues on subsequent opens)
+        const savePathBtn = document.getElementById('savePath');
+        if (savePathBtn && !savePathBtn.__bound) {
+            savePathBtn.addEventListener('click', () => {
+                const f = document.getElementById('pathForm');
+                if (f) f.requestSubmit();
+            });
+            savePathBtn.__bound = true;
+        }
         
         // Object modal
         document.getElementById('closeObjectModal').addEventListener('click', this.closeObjectModal.bind(this));
@@ -363,12 +382,15 @@ class SpaghettiDiagramApp {
                 this.showDeleteConfirmation(this.selectedObject, 'object');
             }
         });
-    }      populateObjectPalette() {
+    }
+      populateObjectPalette() {
+        console.log('[DEBUG] populateObjectPalette() called');
         const palette = document.getElementById('objectPalette');
-        if (!palette) return;
+        console.log('[DEBUG] Palette element found:', palette);
         palette.innerHTML = '';
         
         this.objectTemplates.forEach(template => {
+            console.log('[DEBUG] Creating item for template:', template.name);
             const item = document.createElement('div');
             item.className = 'object-item';
             item.dataset.objectType = template.name;
@@ -389,11 +411,7 @@ class SpaghettiDiagramApp {
             item.appendChild(label);
             palette.appendChild(item);
         });
-        
-        // Bind events after palette is populated
-        setTimeout(() => {
-            this.bindObjectPaletteEvents();
-        }, 10);
+        console.log('[DEBUG] populateObjectPalette() completed. Palette children count:', palette.children.length);
     }
     
     // New: safeguard to restore object palette if it becomes empty or was not rendered
@@ -543,10 +561,12 @@ class SpaghettiDiagramApp {
         this.addObject(objectType, x, y);
         // Clear dragging state
         this._draggingObjectType = null;
-    }      addObject(typeName, x, y) {
+    }
+      addObject(typeName, x, y) {
+        console.log('[DEBUG] addObject called with:', typeName, x, y);
         const template = this.objectTemplates.find(t => t.name === typeName);
         if (!template) {
-            console.error('Template not found for:', typeName);
+            console.error('[DEBUG] Template not found for:', typeName);
             return;
         }
         
@@ -562,9 +582,12 @@ class SpaghettiDiagramApp {
             visits: 0
         };
         
+        console.log('[DEBUG] Created object:', obj);
         this.objects.push(obj);
+        console.log('[DEBUG] Objects array now has length:', this.objects.length);
         this.selectedObject = obj;
         this.setTool('select'); // Switch to select tool after adding object
+        console.log('[DEBUG] Calling render...');
         this.render();
 
         this.refreshAutoPathSelects();
@@ -1068,19 +1091,24 @@ class SpaghettiDiagramApp {
     }
     
     finalizePath() {
+        console.log('[PATH][finalizePath] invoked. currentPath length:', this.currentPath.length, 'isDrawing:', this.isDrawing);
         if (this.currentPath.length < 2) {
+            console.warn('[PATH][finalizePath] Aborting: fewer than 2 points.');
             this.currentPath = [];
             this.render();
             return;
         }
-        
+        const beforeSimplify = this.currentPath.length;
         // Simplify path to reduce point count
         const simplified = this.simplifyPath(this.currentPath);
+        console.log('[PATH][finalizePath] Simplified from', beforeSimplify, 'to', simplified.length, 'points');
         if (simplified.length >= 2) {
             this.tempPathPoints = simplified;
+            console.log('[PATH][finalizePath] tempPathPoints set. Length:', this.tempPathPoints.length);
             this.openPathModal();
+        } else {
+            console.warn('[PATH][finalizePath] Simplified path invalid (<2 points).');
         }
-        
         this.currentPath = [];
         this.render();
     }
@@ -1146,54 +1174,81 @@ class SpaghettiDiagramApp {
     }
     
     openPathModal() {
-        document.getElementById('pathModal').classList.remove('hidden');
-        document.getElementById('pathDescription').focus();
+        console.log('[PATH][openPathModal] Opening path modal. tempPathPoints length:', this.tempPathPoints && this.tempPathPoints.length);
+        const modal = document.getElementById('pathModal');
+        modal.classList.remove('hidden');
+        const desc = document.getElementById('pathDescription');
+        desc.focus();
+        // Ensure form fields are blank each time except color default
+        // (form.reset may already have happened on prior close)
     }
     
     closePathModal() {
+        console.log('[PATH][closePathModal] Closing path modal. Clearing tempPathPoints.');
         document.getElementById('pathModal').classList.add('hidden');
         document.getElementById('pathForm').reset();
         this.tempPathPoints = null;
     }
     
     savePathMetadata(e) {
+        console.log('[PATH][savePathMetadata] Submit handler entered.');
         e.preventDefault();
-        
         if (!this.tempPathPoints || this.tempPathPoints.length < 2) {
-            alert('Invalid path data.');
+            console.error('[PATH][savePathMetadata] Invalid tempPathPoints. Value:', this.tempPathPoints);
+            alert('Invalid path data. (Debug: No points)');
             return;
         }
-        
-        const description = document.getElementById('pathDescription').value.trim();
-        const frequency = parseInt(document.getElementById('pathFrequency').value);
-        const color = document.getElementById('pathColor').value;
-        
-        if (!description || frequency < 1) {
+        const descriptionEl = document.getElementById('pathDescription');
+        const frequencyEl = document.getElementById('pathFrequency');
+        const colorEl = document.getElementById('pathColor');
+        const description = descriptionEl.value.trim();
+        const frequency = parseInt(frequencyEl.value);
+        const color = colorEl.value;
+        console.log('[PATH][savePathMetadata] Collected form data:', { description, frequency, color, points: this.tempPathPoints.length });
+        if (!description || frequency < 1 || Number.isNaN(frequency)) {
+            console.warn('[PATH][savePathMetadata] Validation failed.', { description, frequency });
             alert('Please fill in all required fields.');
             return;
         }
-        
+        // Determine attachments (snap endpoints to nearest object center if within threshold)
+        const attachRadius = 30; // px
+        const findAttachment = (pt) => {
+            let best = null; let bestDist = attachRadius;
+            for (const obj of this.objects) {
+                const cx = obj.x + obj.width/2; const cy = obj.y + obj.height/2;
+                const d = Math.hypot(pt.x-cx, pt.y-cy);
+                if (d < bestDist) { bestDist = d; best = obj; }
+            }
+            return best;
+        };
+        const startPt = this.tempPathPoints[0];
+        const endPt = this.tempPathPoints[this.tempPathPoints.length-1];
+        const startObj = findAttachment(startPt);
+        const endObj = findAttachment(endPt);
+        if (startObj) { startPt.x = startObj.x + startObj.width/2; startPt.y = startObj.y + startObj.height/2; }
+        if (endObj) { endPt.x = endObj.x + endObj.width/2; endPt.y = endObj.y + endObj.height/2; }
         const path = {
             id: Date.now() + Math.random(),
             points: [...this.tempPathPoints],
             description,
             frequency,
             color,
+            startObjectId: startObj ? startObj.id : null,
+            endObjectId: endObj ? endObj.id : null,
             length: this.calculatePathLength(this.tempPathPoints)
         };
-        
+        console.log('[PATH][savePathMetadata] Adding path object:', path);
         this.paths.push(path);
+        console.log('[PATH][savePathMetadata] Paths total now:', this.paths.length);
         this.updateObjectVisits(path);
         this.updateAnalytics();
         this.closePathModal();
         this.render();
-        
         // Show success feedback
         const info = document.getElementById('canvasInfo');
         const originalText = info.textContent;
         info.textContent = `Path "${description}" added successfully!`;
         info.style.color = 'var(--color-success)';
-        
         setTimeout(() => {
             info.textContent = originalText;
             info.style.color = '';
@@ -1327,31 +1382,48 @@ class SpaghettiDiagramApp {
         const cellSize = Math.max(5, parseInt(this.autoPathCellSizeEl?.value)||20);
         const proxWeight = Math.max(0, parseFloat(this.autoPathProximityEl?.value)||0);
         const smoothingMode = this.autoPathSmoothingEl?.value || 'rounded';
+        console.log('[AUTO][generate] start', startObj.name, 'end', endObj.name, 'cell', cellSize, 'prox', proxWeight);
         const route = this.computeAutoRoute(startObj, endObj, { cellSize, proxWeight });
-        if (!route || route.length < 2) { this.showInfoMessage('No path found.','error'); return; }
+        if (!route || route.length < 2) { console.warn('[AUTO] No path found, route:', route); this.showInfoMessage('No path found.','error'); return; }
         let smooth = route;
         if (smoothingMode === 'rounded') smooth = this.smoothPolyline(route);
         else if (smoothingMode === 'catmull') smooth = this.catmullRomSpline(route, 8);
+        smooth[0] = { x: startObj.x + startObj.width/2, y: startObj.y + startObj.height/2 };
+        smooth[smooth.length-1] = { x: endObj.x + endObj.width/2, y: endObj.y + endObj.height/2 };
         const color = '#0074D9';
-        const path = { id: Date.now()+Math.random(), auto: true, points: smooth, description: `${startObj.name} → ${endObj.name}`, frequency: 1, color, length: this.calculatePathLength(smooth) };
+        const path = { id: Date.now()+Math.random(), auto: true, points: smooth, description: `${startObj.name} → ${endObj.name}`, frequency: 1, color, startObjectId: startObj.id, endObjectId: endObj.id, length: this.calculatePathLength(smooth) };
+        console.log('[AUTO][generate] path created points:', smooth.length, 'length:', path.length);
         this.paths.push(path);
+        // FIX: clear any drawing state so path is immediately visible without switching tools
+        this.isDrawing = false;
+        this.currentPath = [];
+        // Optionally switch to select to avoid confusion
+        this.setTool('select');
         this.updateObjectVisits(path);
         this.updateAnalytics();
         this.render();
         this.showInfoMessage('Auto path added.','success');
     }
     computeAutoRoute(startObj, endObj, opts={}) {
+        console.log('[AUTO][compute] Begin');
         const padding = 40;
         const cell = Math.max(5, opts.cellSize || 20);
         const proxWeight = opts.proxWeight || 0; // cost scale for proximity
-        const blockedRects = [...this.objects, ...this.obstacles, ...this.zones.filter(z=>z.type==='restricted')];
+        // Exclude start & end from blocked rectangles so we can stand on them
+        const blockedRects = [
+            ...this.objects.filter(o => o !== startObj && o !== endObj),
+            ...this.obstacles,
+            ...this.zones.filter(z=>z.type==='restricted')
+        ];
         const items = blockedRects;
-        const minX = Math.max(0, Math.min(startObj.x, endObj.x, ...items.map(i=>i.x)) - padding);
-        const minY = Math.max(0, Math.min(startObj.y, endObj.y, ...items.map(i=>i.y)) - padding);
-        const maxX = Math.max(startObj.x+startObj.width, endObj.x+endObj.width, ...items.map(i=>i.x+i.width)) + padding;
-        const maxY = Math.max(startObj.y+startObj.height, endObj.y+endObj.height, ...items.map(i=>i.y+i.height)) + padding;
+        if (!startObj || !endObj) { console.warn('[AUTO][compute] Missing start/end'); return null; }
+        const minX = Math.max(0, Math.min(startObj.x, endObj.x, ...(items.length? items.map(i=>i.x): [startObj.x, endObj.x])) - padding);
+        const minY = Math.max(0, Math.min(startObj.y, endObj.y, ...(items.length? items.map(i=>i.y): [startObj.y, endObj.y])) - padding);
+        const maxX = Math.max(startObj.x+startObj.width, endObj.x+endObj.width, ...(items.length? items.map(i=>i.x+i.width): [startObj.x+startObj.width, endObj.x+endObj.width])) + padding;
+        const maxY = Math.max(startObj.y+startObj.height, endObj.y+endObj.height, ...(items.length? items.map(i=>i.y+i.height): [startObj.y+startObj.height, endObj.y+endObj.height])) + padding;
         const cols = Math.ceil((maxX - minX) / cell);
         const rows = Math.ceil((maxY - minY) / cell);
+        if (cols<=0 || rows<=0) { console.warn('[AUTO][compute] Invalid grid size', cols, rows); return null; }
         const grid = new Array(rows).fill(0).map(()=>new Array(cols).fill(0));
         const markBlocked = (rX, rY, rW, rH) => {
             const c1 = Math.floor((rX - minX)/cell); const c2 = Math.floor((rX + rW - minX)/cell);
@@ -1382,16 +1454,20 @@ class SpaghettiDiagramApp {
         const startNode = { c: Math.floor((start.x - minX)/cell), r: Math.floor((start.y - minY)/cell) };
         const endNode = { c: Math.floor((end.x - minX)/cell), r: Math.floor((end.y - minY)/cell) };
         const inside = (r,c)=> r>=0&&r<rows&&c>=0&&c<cols && grid[r][c]===0;
-        if (!inside(startNode.r,startNode.c) || !inside(endNode.r,endNode.c)) return null;
+        if (!inside(startNode.r,startNode.c)) { console.warn('[AUTO][compute] Start blocked at', startNode); grid[startNode.r]&& (grid[startNode.r][startNode.c]=0); if(!inside(startNode.r,startNode.c)) return null; }
+        if (!inside(endNode.r,endNode.c)) { console.warn('[AUTO][compute] End blocked at', endNode); grid[endNode.r]&& (grid[endNode.r][endNode.c]=0); if(!inside(endNode.r,endNode.c)) return null; }
         const h = (r,c)=> Math.hypot(c-endNode.c, r-endNode.r);
         const open = new Map(); const key=(r,c)=>r+','+c; const gScore = new Map(); const fScore = new Map(); const came = new Map();
         const push = (r,c,g)=>{ const f=g+h(r,c); open.set(key(r,c), {r,c,f,g}); gScore.set(key(r,c),g); fScore.set(key(r,c),f); };
         push(startNode.r,startNode.c,0);
         const dirs = [ [1,0],[0,1],[-1,0],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1] ];
+        let iterations = 0;
         while (open.size) {
+            iterations++;
             let currentKey=null,current=null,lowest=Infinity; for (const [k,v] of open){ if (v.f<lowest){lowest=v.f;current=v;currentKey=k;} }
             if (!current) break;
             if (current.r===endNode.r && current.c===endNode.c) {
+                console.log('[AUTO][compute] Reached goal in', iterations, 'iterations');
                 const pts=[]; let ck=currentKey;
                 while (ck){ const [rr,cc]=ck.split(',').map(Number); pts.push({x: minX+cc*cell+cell/2, y: minY+rr*cell+cell/2}); ck=came.get(ck); }
                 pts.reverse(); return pts;
@@ -1406,7 +1482,9 @@ class SpaghettiDiagramApp {
                 const nk=key(nr,nc);
                 if (tentative < (gScore.get(nk) ?? Infinity)) { came.set(nk,currentKey); push(nr,nc,tentative); }
             }
+            if (iterations > 20000) { console.warn('[AUTO][compute] Iteration cap reached'); break; }
         }
+        console.warn('[AUTO][compute] Failed to find path');
         return null;
     }
     catmullRomSpline(points, segmentsPer=6) {
@@ -1428,28 +1506,22 @@ class SpaghettiDiagramApp {
         return out;
     }    // ---- RECONSTRUCTED / RESTORED CORE METHODS (previously truncated) ----
     render() {
+        console.log('[DEBUG] render() called - objects count:', this.objects.length);
         if (!this.ctx) {
-            console.error('No canvas context available');
+            console.error('[DEBUG] No canvas context available');
             return;
         }
         const ctx = this.ctx;
         ctx.save();
-        
-        // CRITICAL FIX: Proper canvas reset and transform
         ctx.setTransform(1,0,0,1,0,0);
         ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
-        
         // Background fill
         ctx.fillStyle = '#f8f9fa';
         ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
 
-        // Apply pan/zoom transform
-        const zoom = this.zoom || 1;
-        const panX = this.pan?.x || 0;
-        const panY = this.pan?.y || 0;
-        
-        ctx.translate(panX, panY);
-        ctx.scale(zoom, zoom);
+        // Apply pan/zoom
+        ctx.translate(this.pan.x, this.pan.y);
+        ctx.scale(this.zoom || 1, this.zoom || 1);
 
         // Draw background image/pdf with orientation transforms
         if (this.backgroundRect && (this.backgroundImage || this.backgroundPdfPageCanvas)) {
@@ -1493,13 +1565,8 @@ class SpaghettiDiagramApp {
         if (this.isDrawing && this.currentTool === 'zone' && this.currentZone) {
             const z=this.currentZone; ctx.save(); ctx.fillStyle='rgba(0,160,0,0.20)'; ctx.strokeStyle='rgba(0,100,0,0.9)'; ctx.lineWidth=1.5; ctx.fillRect(z.x,z.y,z.width,z.height); ctx.strokeRect(z.x,z.y,z.width,z.height); ctx.restore();
         }
-        
-        // Objects - CRITICAL RENDERING
-        console.log('[DEBUG] About to render', this.objects.length, 'objects');
-        for (const o of this.objects) {
-            console.log('[DEBUG] Rendering object:', o.name, 'at', o.x, o.y);
-            this.drawObject(ctx, o);
-        }
+        // Objects
+        for (const o of this.objects) this.drawObject(ctx, o);
 
         // Selection outlines & resize handles
         const sel = this.selectedObject || this.selectedZone || this.selectedObstacle;
@@ -1514,6 +1581,7 @@ class SpaghettiDiagramApp {
         }
 
         // Path endpoints highlight when dragging
+
         if (this.selectedPath) {
             ctx.save();
             ctx.fillStyle = '#1e88e5';
@@ -1526,7 +1594,6 @@ class SpaghettiDiagramApp {
         }
 
         ctx.restore();
-        console.log('[DEBUG] render() completed');
     }
 
     drawGrid(ctx){
@@ -1554,10 +1621,22 @@ class SpaghettiDiagramApp {
     }
     drawObstacle(ctx,o){ ctx.save(); ctx.fillStyle='rgba(180,0,0,0.25)'; ctx.strokeStyle='rgba(160,0,0,0.9)'; ctx.lineWidth=1.5; ctx.fillRect(o.x,o.y,o.width,o.height); ctx.strokeRect(o.x,o.y,o.width,o.height); ctx.restore(); }
     drawZone(ctx,z){ const isRestricted = z.type==='restricted'; ctx.save(); ctx.fillStyle = isRestricted? 'rgba(220,0,0,0.18)':'rgba(0,160,0,0.18)'; ctx.strokeStyle = isRestricted? 'rgba(160,0,0,0.9)':'rgba(0,110,0,0.9)'; ctx.lineWidth=1.5; ctx.fillRect(z.x,z.y,z.width,z.height); ctx.strokeRect(z.x,z.y,z.width,z.height); if (z.name){ ctx.fillStyle = '#222'; ctx.font='12px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top'; ctx.fillText(z.name, z.x+4, z.y+4); } ctx.restore(); }
-    drawPath(ctx,p){ if (!p.points || p.points.length<2) return; ctx.save(); ctx.strokeStyle = p.color || '#ff0000'; ctx.lineWidth = 2; ctx.beginPath(); p.points.forEach((pt,i)=>{ if(!i) ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y); }); ctx.stroke(); ctx.restore(); }
+    drawPath(ctx,p){ if (!p.points || p.points.length<2) return; 
+        // Auto-update attached endpoints to object centers
+        const adjustEndpoint = (objId, index) => {
+            if (!objId) return;
+            const obj = this.objects.find(o=>o.id===objId);
+            if (!obj) return;
+            const center = { x: obj.x + obj.width/2, y: obj.y + obj.height/2 };
+            const pt = p.points[index];
+            if (!pt || pt.x!==center.x || pt.y!==center.y) { p.points[index] = center; p.length = this.calculatePathLength(p.points); }
+        };
+        adjustEndpoint(p.startObjectId, 0);
+        adjustEndpoint(p.endObjectId, p.points.length-1);
+        ctx.save(); ctx.strokeStyle = p.color || '#ff0000'; ctx.lineWidth = 2; ctx.beginPath(); p.points.forEach((pt,i)=>{ if(!i) ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y); }); ctx.stroke(); ctx.restore(); }
     drawResizeHandles(ctx, target){ const handles = this.getResizeHandlePositions(target); ctx.save(); ctx.fillStyle='#1e88e5'; handles.forEach(h=>{ ctx.fillRect(h.x-4,h.y-4,8,8); }); ctx.restore(); }
 
-    getResizeHandlePositions(t){ const x=t.x,y=t.y,w=t.width,h=t.height; return [ {name:'nw',x,y},{name:'n',x:x+w/2,y},{name:'ne',x:x+w,y},{name:'e',x:x+w,y:y+h/2},{name:'se',x:x+w,y:y+h},{name:'s',x:x+w/2,y:y+h},{name:'sw',x,y:y+h}{name:'w',x,y:y+h/2} ]; }
+    getResizeHandlePositions(t){ const x=t.x,y=t.y,w=t.width,h=t.height; return [ {name:'nw',x,y},{name:'n',x:x+w/2,y},{name:'ne',x:x+w,y},{name:'e',x:x+w,y:y+h/2},{name:'se',x:x+w,y:y+h},{name:'s',x:x+w/2,y:y+h},{name:'sw',x,y:y+h},{name:'w',x,y:y+h/2} ]; }
     getResizeHandle(pos, target){ const handles=this.getResizeHandlePositions(target); for (const h of handles){ if (Math.abs(pos.x-h.x)<=6 && Math.abs(pos.y-h.y)<=6) return h.name; } return null; }
 
     getObjectAt(pt){ for (let i=this.objects.length-1;i>=0;i--){ const o=this.objects[i]; if (pt.x>=o.x && pt.x<=o.x+o.width && pt.y>=o.y && pt.y<=o.y+o.height) return o; } return null; }
@@ -1570,7 +1649,7 @@ class SpaghettiDiagramApp {
 
     handleEndpointDrag(){ if (!this.selectedPath||!this.selectedEndpoint) return; const pts=this.selectedPath.points; if (!pts||pts.length<2) return; if (this.selectedEndpoint==='start') pts[0]={...this.mousePos}; else pts[pts.length-1]={...this.mousePos}; this.selectedPath.length = this.calculatePathLength(pts); this.updateAnalytics(); this.render(); }
 
-    smoothPolyline(points, radius=18){ if (!points||points.length<3) return points||[]; const out=[points[0]]; for (let i=1;i<points.length-1;i++){ const p0=points[i-1], p1=points[i], p2=points[i+1]; const v1={x:p0.x-p1.x,y:p0.y-p1.y}; const v2={x:p2.x-p1.x,y:p2.y-p1.y}; const len1=Math.hypot(v1.x,v1.y); const len2=Math.hypot(v2.x,v2.y); if (!len1||!len2){ out.push(p1); continue; } const r=Math.min(radius, len1/2, len2/2); const n1={x:v1.x/len1,y:v1.y/len1}; const n2={x:v2.x/v2.y}; const pA={x:p1.x+n1.x*r,y:p1.y+n1.y*r}; const pB={x:p1.x+n2.x*r,y:p1.y+n2.y*r}; out.push(pA); out.push(pB); } out.push(points[points.length-1]); return out; }
+    smoothPolyline(points, radius=18){ if (!points||points.length<3) return points||[]; const out=[points[0]]; for (let i=1;i<points.length-1;i++){ const p0=points[i-1], p1=points[i], p2=points[i+1]; const v1={x:p0.x-p1.x,y:p0.y-p1.y}; const v2={x:p2.x-p1.x,y:p2.y-p1.y}; const len1=Math.hypot(v1.x,v1.y); const len2=Math.hypot(v2.x,v2.y); if (!len1||!len2){ out.push(p1); continue; } const r=Math.min(radius, len1/2, len2/2); const n1={x:v1.x/len1,y:v1.y/len1}; const n2={x:v2.x/len2,y:v2.y/len2}; const pA={x:p1.x+n1.x*r,y:p1.y+n1.y*r}; const pB={x:p1.x+n2.x*r,y:p1.y+n2.y*r}; out.push(pA); out.push(pB); } out.push(points[points.length-1]); return out; }
 
     calculatePathLength(points){ if (!points||points.length<2) return 0; let d=0; for (let i=1;i<points.length;i++){ const a=points[i-1], b=points[i]; d+=Math.hypot(b.x-a.x,b.y-a.y); } return d; }
     updateObjectVisits(path){ if (!path||!path.points||path.points.length<2) return; const start=path.points[0], end=path.points[path.points.length-1]; const inc=(pt)=>{ const obj=this.getObjectAt(pt); if (obj) obj.visits=(obj.visits||0)+ (path.frequency||1); }; inc(start); inc(end); }
@@ -1616,16 +1695,6 @@ class SpaghettiDiagramApp {
     rotateBackground(delta){ this.backgroundTransform.rotation = ((this.backgroundTransform.rotation||0)+delta)%360; this.render(); }
     flipBackground(axis){ if (axis==='h') this.backgroundTransform.flipH=!this.backgroundTransform.flipH; else if (axis==='v') this.backgroundTransform.flipV=!this.backgroundTransform.flipV; this.render(); }
     resetBackgroundTransform(){ this.backgroundTransform={rotation:0,flipH:false,flipV:false}; this.render(); }
-
-    // CRITICAL FIX: Ensure proper viewport initialization  
-    initializeViewport() {
-        console.log('[DEBUG] initializeViewport() called');
-        this.zoom = 1;
-        this.pan = { x: 0, y: 0 };
-        this.isPanning = false;
-        this.lastClientPos = { x: 0, y: 0 };
-        console.log('[DEBUG] Viewport initialized - zoom:', this.zoom, 'pan:', this.pan);
-    }
 
     // ---- Deletion ----
     showDeleteConfirmation(item, type){ const modal=document.getElementById('deleteModal'); const msg=document.getElementById('deleteMessage'); if (msg) msg.textContent=`Delete this ${type}?`; this._pendingDelete={item,type}; if (modal) modal.classList.remove('hidden'); }
@@ -1680,5 +1749,22 @@ class SpaghettiDiagramApp {
         }
     } else {
         console.log('[Bootstrap] App already exists:', window.app);
+    }
+})();
+
+// Attach a global debug helper after class definition (bootstrap area below may already exist)
+(function() {
+    const dumpPathsBtn = document.getElementById('dumpPaths');
+    if (dumpPathsBtn) {
+        dumpPathsBtn.addEventListener('click', () => {
+            if (!window.app) return;
+            const { paths } = window.app;
+            const dumpWindow = window.open('', '_blank');
+            if (!dumpWindow) return;
+            dumpWindow.document.write('<html><head><title>Paths Dump</title></head><body><pre>');
+            dumpWindow.document.write(JSON.stringify(paths, null, 2));
+            dumpWindow.document.write('</pre></body></html>');
+            dumpWindow.document.close();
+        });
     }
 })();
