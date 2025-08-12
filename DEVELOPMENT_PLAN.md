@@ -408,3 +408,76 @@ The Spaghetti Diagram App has a solid foundation with working background managem
 **Budget Consideration**: Primarily development time + hosting costs
 
 The modular architecture allows for parallel development of features and easy maintenance. The app can be deployed incrementally, with each phase adding value for users.
+
+---
+
+# Spaghetti Diagram Application Development Plan
+
+## Completed
+- Object/zone/obstacle selection, drag, resize
+- Auto path generation (A* grid, proximity weighting, smoothing: rounded & Catmull‑Rom)
+- UI controls for auto path parameters (grid size, proximity, smoothing mode)
+- Analytics integration & enhanced metrics (efficiency, spaghetti index)
+- Regression fix: restored render & core helpers
+
+## Immediate Fixes
+- Ensure bootstrap instantiation (window.app) so objects render (DONE)
+- Verify palette click & drag/drop create objects
+
+## Priority Backlog
+1. Robustness & Edge Cases
+   - Start/end blocked detection & nearest free cell nudge
+   - Enhanced no‑path feedback with suggestions
+   - De‑duplicate identical auto paths (hash params)
+2. Performance & Caching
+   - Occupancy/proximity grid cache keyed by scene + params
+   - Priority queue for A* open set
+   - Abort safeguard for excessive open size
+3. Adaptive Grid
+   - Coarse→fine refinement, merge segments
+   - UI toggle + inputs (coarse / fine cell px)
+4. Smoothing Enhancements
+   - Arc/circular corner option with adjustable radius
+   - Catmull‑Rom tension / centripetal mode
+   - Intensity slider for rounded/arc
+5. Live Preview
+   - Debounced background compute of ghost route
+   - Dashed preview; commit only on Generate
+   - Cancel stale computations (request id)
+6. Auto Re‑routing
+   - Mark affected auto paths dirty on object move/resize
+   - Regenerate button or auto toggle
+7. Endpoint Snapping
+   - Snap start/end to nearest perimeter edge midpoint or directionally appropriate anchor
+8. Path Differentiation & Regeneration
+   - Store metadata params on path
+   - Regenerate with current params action
+9. Parameter Persistence & Export
+   - Export/import defaults & per‑path metadata
+10. Avoidance Toggles
+    - Optional ignore green zones / obstacles / restricted
+11. Analytics Expansion
+    - Separate auto vs manual totals; efficiency aggregates
+12. Large Workspace & Benchmarking
+    - Synthetic generator; adaptive parameter suggestions
+13. UI/UX Polish
+    - Spinner & disabled state while computing
+    - Proximity heatmap overlay toggle
+    - Better empty / error states (no path, blocked)
+
+## Technical Notes
+- Scene version integer increments on any geometry change; used in cache key
+- Path object: { id, auto, points, params:{cellSize, proxWeight, smoothing, timestamp}, length }
+- Preview path stored transiently: this.previewAutoPathPoints
+- Priority queue: simple binary heap (array) with fScore comparison
+- Arc smoothing: compute tangent points given corner angle & radius cap (min(adjacent segment lengths/2))
+
+## Testing Strategy
+- Unit test geometry helpers (pointSegmentDistance, smoothing functions)
+- Stress test: 500 objects + 200 obstacles; measure A* ms at various cell sizes
+- Visual diff for smoothing modes
+
+## Future Ideas
+- Multi-floor support (tabs)
+- Collaborative editing (WebSocket)
+- Heatmap accumulation over time
