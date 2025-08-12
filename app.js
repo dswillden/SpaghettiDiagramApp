@@ -749,24 +749,35 @@ class SpaghettiDiagramApp {
         return { x, y };
     }
     
+    getAnyRectAt(point) {
+        // Objects on top, then zones, then obstacles (matching existing delete logic priority)
+        const obj = this.getObjectAt(point);
+        if (obj) return { item: obj, type: 'object' };
+        const zone = this.getZoneAt(point);
+        if (zone) return { item: zone, type: 'zone' };
+        const obstacle = this.getObstacleAt(point);
+        if (obstacle) return { item: obstacle, type: 'obstacle' };
+        return null;
+    }
+    
     handleMouseDown(e) {
         e.preventDefault();
         this.mousePos = this.getMousePos(e);
         this.dragStart = { ...this.mousePos };
-        
-        // Calibration click handling has priority
-        if (this.isCalibrating) {
-            this.handleCalibrationClick();
-            return;
-        }
-        
-        // Start panning with middle or right mouse, or left-click on empty space in select mode
-        if (e.button === 1 || e.button === 2 || (e.button === 0 && this.currentTool === 'select' && !this.getObjectAt(this.mousePos) && !this.getPathEndpointAt(this.mousePos))) {
+        if (this.isCalibrating) { this.handleCalibrationClick(); return; }
+        // Determine hover targets BEFORE deciding to pan so resize/drag takes precedence
+        const rectHit = this.getAnyRectAt(this.mousePos);
+        const endpointInfo = this.getPathEndpointAt(this.mousePos);
+        // Check for any resize handle under cursor (selected item or hovered item)
+        let resizeCandidate = null;
+        const candidateTarget = (rectHit && rectHit.item) || this.selectedObject || this.selectedZone || this.selectedObstacle;
+        if (candidateTarget) resizeCandidate = this.getResizeHandle(this.mousePos, candidateTarget);
+        const wantPan = (e.button === 1 || e.button === 2 || (e.button === 0 && this.currentTool === 'select' && !rectHit && !endpointInfo && !resizeCandidate));
+        if (wantPan) {
             this.isPanning = true;
             this.lastClientPos = { x: e.clientX, y: e.clientY };
             return;
         }
-        
         if (this.currentTool === 'select') {
             this.handleSelectMouseDown();
         } else if (this.currentTool === 'path') {
@@ -1090,6 +1101,9 @@ class SpaghettiDiagramApp {
             
             this.currentObstacle.id = Date.now() + Math.random();
             this.obstacles.push({ ...this.currentObstacle });
+            this.selectedObstacle = this.obstacles[this.obstacles.length - 1];
+            // Switch to select to immediately allow drag/resize
+            this.setTool('select');
         }
         this.currentObstacle = null;
         this.render();
@@ -1102,9 +1116,10 @@ class SpaghettiDiagramApp {
             if (this.currentZone.height < 0) { this.currentZone.y += this.currentZone.height; this.currentZone.height = Math.abs(this.currentZone.height); }
             this.currentZone.id = Date.now() + Math.random();
             this.zones.push({ ...this.currentZone });
-            // Open modal to set properties
             this.selectedZone = this.zones[this.zones.length - 1];
+            // Open zone modal, but keep immediate select/resize behavior
             this.openZoneModal();
+            this.setTool('select');
         }
         this.currentZone = null;
         this.render();
