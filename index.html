@@ -276,6 +276,24 @@
                 </div>
             </div>
         </div>
+
+        <!-- Delete Confirmation Modal -->
+        <div class="modal hidden" id="deleteModal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="deleteModalTitle">Confirm Delete</h3>
+                    <button class="modal-close" id="closeDeleteModal" aria-label="Close Delete Confirmation">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p id="deleteMessage"></p>
+                    <p id="deleteWarning" class="text-warning hidden" style="color: var(--color-warning, #ed6c02); font-weight: 500;"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn--secondary" id="cancelDelete">Cancel</button>
+                    <button type="button" class="btn btn--danger" id="confirmDelete" style="background: var(--color-error, #d32f2f);">Delete</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Simplified PDF.js static includes for reliability -->
@@ -304,5 +322,7 @@
         .catch(e => console.error('[PDF Init] pdf.worker.min.js not accessible:', e));
     </script>
     <script src="app.js"></script>
+    <!-- Enhanced features - Phase 1 -->
+    <script src="app_enhanced.js"></script>
 </body>
 </html>
