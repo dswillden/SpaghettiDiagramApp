@@ -12,6 +12,7 @@ class SpaghettiDiagramApp {
         this.objects = [];
         this.paths = [];
         this.obstacles = [];
+        this.zones = [];
         this.backgroundImage = null;
         this.backgroundPdfPageCanvas = null; // offscreen canvas for rendered PDF page
         this.backgroundTransform = { rotation: 0, flipH: false, flipV: false };
@@ -20,6 +21,7 @@ class SpaghettiDiagramApp {
         this.selectedObject = null;
         this.currentPath = [];
         this.currentObstacle = null;
+        this.currentZone = null;
         this.tempPathPoints = null;
         
         // Flag to ensure we only apply the deferred initial reset once
@@ -297,6 +299,14 @@ class SpaghettiDiagramApp {
         document.getElementById('closeDeleteModal').addEventListener('click', this.closeDeleteModal.bind(this));
         document.getElementById('cancelDelete').addEventListener('click', this.closeDeleteModal.bind(this));
         document.getElementById('confirmDelete').addEventListener('click', this.confirmDelete.bind(this));
+
+        // Zone modal
+        const closeZone = document.getElementById('closeZoneModal');
+        const deleteZoneBtn = document.getElementById('deleteZone');
+        const zoneForm = document.getElementById('zoneForm');
+        if (closeZone) closeZone.addEventListener('click', this.closeZoneModal.bind(this));
+        if (deleteZoneBtn) deleteZoneBtn.addEventListener('click', this.deleteSelectedZone.bind(this));
+        if (zoneForm) zoneForm.addEventListener('submit', this.saveZoneMetadata.bind(this));
         
         // Calibration modal
         const calibModal = document.getElementById('calibrateModal');
@@ -463,8 +473,9 @@ class SpaghettiDiagramApp {
         const infoText = {
             select: 'Click and drag to move objects. Double-click to edit properties. Press Delete key to delete selected objects.',
             path: 'Click and drag to draw walking paths between objects.',
+            zone: 'Click and drag to draw a rectangular zone (Green or Restricted). Double-click to edit properties.',
             obstacle: 'Click and drag to create obstacle/off-limits zones.',
-            delete: 'Click on an object, path, or obstacle to delete it. A confirmation dialog will appear.'
+            delete: 'Click on an object, path, zone, or obstacle to delete it. A confirmation dialog will appear.'
         };
         document.getElementById('canvasInfo').textContent = infoText[tool] || 'Select a tool to begin.';
 
@@ -760,6 +771,8 @@ class SpaghettiDiagramApp {
             this.handleSelectMouseDown();
         } else if (this.currentTool === 'path') {
             this.handlePathMouseDown();
+        } else if (this.currentTool === 'zone') {
+            this.handleZoneMouseDown();
         } else if (this.currentTool === 'obstacle') {
             this.handleObstacleMouseDown();
         } else if (this.currentTool === 'delete') {
@@ -827,6 +840,20 @@ class SpaghettiDiagramApp {
             height: 0
         };
     }
+
+    // Zone drawing (rectangle for now)
+    handleZoneMouseDown() {
+        this.isDrawing = true;
+        this.currentZone = {
+            x: this.mousePos.x,
+            y: this.mousePos.y,
+            width: 0,
+            height: 0,
+            id: null,
+            name: 'Zone',
+            type: 'green' // default
+        };
+    }
     
     handleDeleteMouseDown() {
         const point = this.mousePos;
@@ -845,11 +872,18 @@ class SpaghettiDiagramApp {
                 itemToDelete = clickedPath;
                 deleteType = 'path';
             } else {
-                // Check for obstacles
-                const clickedObstacle = this.getObstacleAt(point);
-                if (clickedObstacle) {
-                    itemToDelete = clickedObstacle;
-                    deleteType = 'obstacle';
+                // Check for zones
+                const clickedZone = this.getZoneAt(point);
+                if (clickedZone) {
+                    itemToDelete = clickedZone;
+                    deleteType = 'zone';
+                } else {
+                    // Check for obstacles
+                    const clickedObstacle = this.getObstacleAt(point);
+                    if (clickedObstacle) {
+                        itemToDelete = clickedObstacle;
+                        deleteType = 'obstacle';
+                    }
                 }
             }
         }
@@ -893,6 +927,8 @@ class SpaghettiDiagramApp {
             this.handleSelectMouseMove();
         } else if (this.currentTool === 'path' && this.isDrawing) {
             this.handlePathMouseMove();
+        } else if (this.currentTool === 'zone' && this.isDrawing) {
+            this.handleZoneMouseMove();
         } else if (this.currentTool === 'obstacle' && this.isDrawing) {
             this.handleObstacleMouseMove();
         } else if (this.currentTool === 'delete') {
@@ -966,6 +1002,14 @@ class SpaghettiDiagramApp {
             this.render();
         }
     }
+
+    handleZoneMouseMove() {
+        if (this.currentZone) {
+            this.currentZone.width = this.mousePos.x - this.currentZone.x;
+            this.currentZone.height = this.mousePos.y - this.currentZone.y;
+            this.render();
+        }
+    }
     
     handleResize() {
         const obj = this.selectedObject;
@@ -1006,6 +1050,8 @@ class SpaghettiDiagramApp {
         
         if (this.currentTool === 'path' && this.isDrawing && this.currentPath.length > 1) {
             this.finalizePath();
+        } else if (this.currentTool === 'zone' && this.isDrawing) {
+            this.finalizeZone();
         } else if (this.currentTool === 'obstacle' && this.isDrawing) {
             this.finalizeObstacle();
         }
@@ -1064,6 +1110,21 @@ class SpaghettiDiagramApp {
             this.obstacles.push({ ...this.currentObstacle });
         }
         this.currentObstacle = null;
+        this.render();
+    }
+
+    finalizeZone() {
+        if (this.currentZone && Math.abs(this.currentZone.width) > 10 && Math.abs(this.currentZone.height) > 10) {
+            // Normalize
+            if (this.currentZone.width < 0) { this.currentZone.x += this.currentZone.width; this.currentZone.width = Math.abs(this.currentZone.width); }
+            if (this.currentZone.height < 0) { this.currentZone.y += this.currentZone.height; this.currentZone.height = Math.abs(this.currentZone.height); }
+            this.currentZone.id = Date.now() + Math.random();
+            this.zones.push({ ...this.currentZone });
+            // Open modal to set properties
+            this.selectedZone = this.zones[this.zones.length - 1];
+            this.openZoneModal();
+        }
+        this.currentZone = null;
         this.render();
     }
     
@@ -1144,6 +1205,43 @@ class SpaghettiDiagramApp {
         }, 2000);
     }
     
+    openZoneModal() {
+        if (!this.selectedZone) return;
+        const z = this.selectedZone;
+        const nameEl = document.getElementById('zoneName');
+        const typeEl = document.getElementById('zoneType');
+        if (nameEl) nameEl.value = z.name || '';
+        if (typeEl) typeEl.value = z.type || 'green';
+        const modal = document.getElementById('zoneModal');
+        if (modal) modal.classList.remove('hidden');
+        if (nameEl) nameEl.focus();
+    }
+
+    closeZoneModal() {
+        const modal = document.getElementById('zoneModal');
+        if (modal) modal.classList.add('hidden');
+        const form = document.getElementById('zoneForm');
+        if (form) form.reset();
+    }
+
+    saveZoneMetadata(e) {
+        e.preventDefault();
+        if (!this.selectedZone) return;
+        const name = (document.getElementById('zoneName')?.value || '').trim();
+        const type = document.getElementById('zoneType')?.value || 'green';
+        if (!name) { alert('Zone name is required.'); return; }
+        this.selectedZone.name = name;
+        this.selectedZone.type = type;
+        this.closeZoneModal();
+        this.render();
+    }
+
+    deleteSelectedZone() {
+        if (!this.selectedZone) return;
+        this.showDeleteConfirmation(this.selectedZone, 'zone');
+        this.closeZoneModal();
+    }
+
     openObjectModal() {
         if (!this.selectedObject) return;
         
@@ -1209,6 +1307,16 @@ class SpaghettiDiagramApp {
             if (point.x >= obs.x && point.x <= obs.x + obs.width &&
                 point.y >= obs.y && point.y <= obs.y + obs.height) {
                 return obs;
+            }
+        }
+        return null;
+    }
+
+    getZoneAt(point) {
+        for (let i = this.zones.length - 1; i >= 0; i--) {
+            const z = this.zones[i];
+            if (point.x >= z.x && point.x <= z.x + z.width && point.y >= z.y && point.y <= z.y + z.height) {
+                return z;
             }
         }
         return null;
@@ -1456,6 +1564,9 @@ class SpaghettiDiagramApp {
             this.ctx.restore();
         }
         
+        // Draw zones (under paths and objects)
+        this.zones.forEach(zone => this.drawZone(zone));
+        
         // Draw obstacles
         this.obstacles.forEach(obstacle => this.drawObstacle(obstacle));
         
@@ -1468,6 +1579,11 @@ class SpaghettiDiagramApp {
         // Draw current path being drawn
         if (this.isDrawing && this.currentTool === 'path' && this.currentPath.length > 1) {
             this.drawPath({ points: this.currentPath, color: '#FFA500' });
+        }
+        
+        // Draw current zone being drawn
+        if (this.isDrawing && this.currentTool === 'zone' && this.currentZone) {
+            this.drawZone(this.currentZone, true);
         }
         
         // Draw current obstacle being drawn
@@ -1586,6 +1702,29 @@ class SpaghettiDiagramApp {
         
         this.ctx.fillRect(x, y, w, h);
         this.ctx.strokeRect(x, y, w, h);
+    }
+
+    drawZone(zone, isDrawing = false) {
+        // Colors based on type
+        const type = zone.type || 'green';
+        const fill = type === 'restricted' ? (isDrawing ? 'rgba(255,0,0,0.15)' : 'rgba(255,0,0,0.25)') : (isDrawing ? 'rgba(0,200,0,0.12)' : 'rgba(0,200,0,0.22)');
+        const stroke = type === 'restricted' ? '#ff0000' : '#00a000';
+        this.ctx.fillStyle = fill;
+        this.ctx.strokeStyle = stroke;
+        this.ctx.lineWidth = 2;
+        const x = zone.width < 0 ? zone.x + zone.width : zone.x;
+        const y = zone.height < 0 ? zone.y + zone.height : zone.y;
+        const w = Math.abs(zone.width);
+        const h = Math.abs(zone.height);
+        this.ctx.fillRect(x, y, w, h);
+        this.ctx.strokeRect(x, y, w, h);
+        // Label
+        if (zone.name) {
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = '12px Arial';
+            this.ctx.textAlign = 'left';
+            this.ctx.fillText(`${zone.name}`, x + 4, y + 14);
+        }
     }
 
     drawSelectionHandles(obj) {
@@ -2156,6 +2295,7 @@ class SpaghettiDiagramApp {
             timestamp: new Date().toISOString(),
             objects: this.objects,
             paths: this.paths,
+            zones: this.zones,
             obstacles: this.obstacles,
             scale: {
                 units: this.units,
@@ -2190,7 +2330,7 @@ class SpaghettiDiagramApp {
             warning.classList.add('hidden');
         } else {
             const name = item.name || item.description || `this ${type}`;
-            message.textContent = `Are you sure you want to delete "${name}"? This action cannot be undone.`;
+            message.textContent = `Are you sure you want to delete \"${name}\"? This action cannot be undone.`;
 
             if (type === 'object') {
                 // Check for connected paths
@@ -2205,6 +2345,9 @@ class SpaghettiDiagramApp {
                 } else {
                     warning.classList.add('hidden');
                 }
+            } else if (type === 'zone') {
+                warning.textContent = '';
+                warning.classList.add('hidden');
             } else {
                 warning.classList.add('hidden');
             }
@@ -2244,6 +2387,11 @@ class SpaghettiDiagramApp {
             if (index > -1) {
                 this.paths.splice(index, 1);
                 if (this.selectedPath === item) this.selectedPath = null;
+            }
+        } else if (type === 'zone') {
+            const index = this.zones.indexOf(item);
+            if (index > -1) {
+                this.zones.splice(index, 1);
             }
         } else if (type === 'obstacle') {
             const index = this.obstacles.indexOf(item);

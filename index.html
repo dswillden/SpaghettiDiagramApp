@@ -50,13 +50,17 @@
                             <span class="tool-icon">✏</span>
                             Draw Path
                         </button>
-                        <button id="deleteTool" class="tool-btn" data-tool="delete" data-shortcut="D" title="Delete Item (D)" aria-pressed="false">
-                            <span class="tool-icon">🗑️</span>
-                            Delete Item
+                        <button id="zoneTool" class="tool-btn" data-tool="zone" data-shortcut="Z" title="Add Zone (Z)" aria-pressed="false">
+                            <span class="tool-icon">⬚</span>
+                            Add Zone
                         </button>
                         <button id="obstacleTool" class="tool-btn" data-tool="obstacle" data-shortcut="O" title="Add Obstacle (O)" aria-pressed="false">
                             <span class="tool-icon">⚠</span>
                             Add Obstacle
+                        </button>
+                        <button id="deleteTool" class="tool-btn" data-tool="delete" data-shortcut="D" title="Delete Item (D)" aria-pressed="false">
+                            <span class="tool-icon">🗑️</span>
+                            Delete Item
                         </button>
                     </div>
                 </div>
@@ -129,6 +133,13 @@
                         <div class="empty-state">No paths drawn yet</div>
                     </div>
                 </div>
+
+                <div class="sidebar-section" id="zonesSection">
+                    <h3>Zones</h3>
+                    <div id="zoneList" class="hotspot-list">
+                        <div class="empty-state">No zones yet</div>
+                    </div>
+                </div>
             </aside>
 
             <!-- Main Canvas Area -->
@@ -180,6 +191,35 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn--secondary" id="cancelPath">Cancel</button>
                     <button type="submit" form="pathForm" class="btn btn--primary" id="savePath">Save Path</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zone Details Modal -->
+        <div class="modal hidden" id="zoneModal" role="dialog" aria-modal="true" aria-labelledby="zoneModalTitle">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="zoneModalTitle">Zone Details</h3>
+                    <button class="modal-close" id="closeZoneModal" aria-label="Close Zone Details">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="zoneForm">
+                        <div class="form-group">
+                            <label class="form-label" for="zoneName">Name</label>
+                            <input type="text" id="zoneName" class="form-control" placeholder="e.g., Green Relocation Zone" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="zoneType">Type</label>
+                            <select id="zoneType" class="form-control" required>
+                                <option value="green" selected>Green (OK to move)</option>
+                                <option value="restricted">Restricted (No-go)</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn--secondary" id="deleteZone">Delete Zone</button>
+                    <button type="submit" form="zoneForm" class="btn btn--primary" id="saveZone">Save</button>
                 </div>
             </div>
         </div>
