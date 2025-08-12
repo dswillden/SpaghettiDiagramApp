@@ -104,6 +104,7 @@ class SpaghettiDiagramApp {
         // No deferred reset; only fit when background arrives
         this.setTool('select');
         
+        this.initAutoPathUI();
     }
     
     setLoading(isLoading, message) {
@@ -570,6 +571,8 @@ class SpaghettiDiagramApp {
         this.selectedObject = obj;
         this.setTool('select'); // Switch to select tool after adding object
         this.render();
+
+        this.refreshAutoPathSelects();
     }
     
     async handleBackgroundUpload(e) {
@@ -1286,1171 +1289,149 @@ class SpaghettiDiagramApp {
         this.closeObjectModal(); // Close the object properties modal
     }
     
-    getObjectAt(point) {
-        // Check objects in reverse order (top to bottom)
-        for (let i = this.objects.length - 1; i >= 0; i--) {
-            const obj = this.objects[i];
-            if (point.x >= obj.x && point.x <= obj.x + obj.width &&
-                point.y >= obj.y && point.y <= obj.y + obj.height) {
-                return obj;
-            }
-        }
-        return null;
-    }
-    
-    getObstacleAt(point) {
-        for (let i = this.obstacles.length - 1; i >= 0; i--) {
-            const obs = this.obstacles[i];
-            if (point.x >= obs.x && point.x <= obs.x + obs.width &&
-                point.y >= obs.y && point.y <= obs.y + obs.height) {
-                return obs;
-            }
-        }
-        return null;
-    }
-
-    getZoneAt(point) {
-        for (let i = this.zones.length - 1; i >= 0; i--) {
-            const z = this.zones[i];
-            if (point.x >= z.x && point.x <= z.x + z.width && point.y >= z.y && point.y <= z.y + z.height) {
-                return z;
-            }
-        }
-        return null;
-    }
-
-    getResizeHandle(point, obj) {
-        const tolerance = 8 / (this.zoom || 1); // Make handle hit area larger when zoomed out
-        const handles = {
-            'nw': { x: obj.x, y: obj.y },
-            'ne': { x: obj.x + obj.width, y: obj.y },
-            'sw': { x: obj.x, y: obj.y + obj.height },
-            'se': { x: obj.x + obj.width, y: obj.y + obj.height },
-            'n': { x: obj.x + obj.width / 2, y: obj.y },
-            's': { x: obj.x + obj.width / 2, y: obj.y + obj.height },
-            'w': { x: obj.x, y: obj.y + obj.height / 2 },
-            'e': { x: obj.x + obj.width, y: obj.y + obj.height / 2 }
+    initAutoPathUI() {
+        this.autoPathStartEl = document.getElementById('autoPathStart');
+        this.autoPathEndEl = document.getElementById('autoPathEnd');
+        this.generateAutoPathBtn = document.getElementById('generateAutoPath');
+        this.autoPathCellSizeEl = document.getElementById('autoPathCellSize');
+        this.autoPathProximityEl = document.getElementById('autoPathProximity');
+        this.autoPathSmoothingEl = document.getElementById('autoPathSmoothing');
+        const validate = () => {
+            if (!this.generateAutoPathBtn) return;
+            const ok = this.autoPathStartEl?.value && this.autoPathEndEl?.value && this.autoPathStartEl.value !== this.autoPathEndEl.value;
+            this.generateAutoPathBtn.disabled = !ok;
         };
-
-        for (const [handle, pos] of Object.entries(handles)) {
-            if (Math.abs(point.x - pos.x) <= tolerance && Math.abs(point.y - pos.y) <= tolerance) {
-                return handle;
-            }
+        if (this.autoPathStartEl) this.autoPathStartEl.addEventListener('change', validate);
+        if (this.autoPathEndEl) this.autoPathEndEl.addEventListener('change', validate);
+        if (this.generateAutoPathBtn) {
+            this.generateAutoPathBtn.addEventListener('click', () => this.handleGenerateAutoPath());
         }
-        return null;
+        this.refreshAutoPathSelects();
+        validate();
     }
-
-    getPathAt(point, threshold = 5) {
-        for (const path of this.paths) {
-            for (let i = 0; i < path.points.length - 1; i++) {
-                const p1 = path.points[i];
-                const p2 = path.points[i + 1];
-                const distance = this.pointToSegmentDistance(point, p1, p2);
-                if (distance <= threshold) {
-                    return path;
-                }
-            }
-        }
-        return null;
+    refreshAutoPathSelects() {
+        if (!this.autoPathStartEl || !this.autoPathEndEl) return;
+        const optsHtml = this.objects.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+        const startVal = this.autoPathStartEl.value;
+        const endVal = this.autoPathEndEl.value;
+        this.autoPathStartEl.innerHTML = `<option value="" disabled ${startVal? '' : 'selected'}>Select start</option>` + optsHtml;
+        this.autoPathEndEl.innerHTML = `<option value="" disabled ${endVal? '' : 'selected'}>Select end</option>` + optsHtml;
+        if (startVal) this.autoPathStartEl.value = startVal;
+        if (endVal) this.autoPathEndEl.value = endVal;
+        // trigger validation if button exists
+        if (this.generateAutoPathBtn) this.generateAutoPathBtn.disabled = !(this.autoPathStartEl.value && this.autoPathEndEl.value && this.autoPathStartEl.value !== this.autoPathEndEl.value);
     }
-
-    pointToSegmentDistance(p, p1, p2) {
-        const l2 = (p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2;
-        if (l2 === 0) return Math.sqrt((p.x - p1.x) ** 2 + (p.y - p1.y) ** 2);
-        
-        let t = ((p.x - p1.x) * (p2.x - p1.x) + (p.y - p1.y) * (p2.y - p1.y)) / l2;
-        t = Math.max(0, Math.min(1, t));
-        
-        const projectionX = p1.x + t * (p2.x - p1.x);
-        const projectionY = p1.y + t * (p2.y - p1.y);
-        
-        return Math.sqrt((p.x - projectionX) ** 2 + (p.y - projectionY) ** 2);
-    }
-    
-    getPathEndpointAt(point, threshold = 12) {
-        for (const path of this.paths) {
-            if (path.points.length < 2) continue;
-            
-            // Check start point
-            const startPoint = path.points[0];
-            const startDistance = Math.sqrt(
-                Math.pow(point.x - startPoint.x, 2) + 
-                Math.pow(point.y - startPoint.y, 2)
-            );
-            if (startDistance <= threshold) {
-                return { path, endpoint: 'start' };
-            }
-            
-            // Check end point
-            const endPoint = path.points[path.points.length - 1];
-            const endDistance = Math.sqrt(
-                Math.pow(point.x - endPoint.x, 2) + 
-                Math.pow(point.y - endPoint.y, 2)
-            );
-            if (endDistance <= threshold) {
-                return { path, endpoint: 'end' };
-            }
-        }
-        return null;
-    }
-    
-    checkPathCollision(newPoint, path) {
-        // Check collision with objects
-        for (const obj of this.objects) {
-            if (this.pointIntersectsRect(newPoint, obj)) {
-                return { type: 'object', item: obj };
-            }
-        }
-        
-        // Check collision with obstacles
-        for (const obstacle of this.obstacles) {
-            if (this.pointIntersectsRect(newPoint, obstacle)) {
-                return { type: 'obstacle', item: obstacle };
-            }
-        }
-        
-        return null;
-    }
-    
-    pointIntersectsRect(point, rect) {
-        return point.x >= rect.x && 
-               point.x <= rect.x + rect.width &&
-               point.y >= rect.y && 
-               point.y <= rect.y + rect.height;
-    }
-    
-    checkPathSegmentCollision(p1, p2) {
-        // Check collision with objects
-        for (const obj of this.objects) {
-            if (this.lineIntersectsRect(p1, p2, obj)) {
-                return { type: 'object', item: obj };
-            }
-        }
-        
-        // Check collision with obstacles
-        for (const obstacle of this.obstacles) {
-            if (this.lineIntersectsRect(p1, p2, obstacle)) {
-                return { type: 'obstacle', item: obstacle };
-            }
-        }
-        
-        return null;
-    }
-    
-    lineIntersectsRect(p1, p2, rect) {
-        // Check if line segment intersects with rectangle
-        const rectLeft = rect.x;
-        const rectRight = rect.x + rect.width;
-        const rectTop = rect.y;
-        const rectBottom = rect.y + rect.height;
-        
-        // Check intersection with each edge of the rectangle
-        return this.lineIntersectsLine(p1, p2, {x: rectLeft, y: rectTop}, {x: rectRight, y: rectTop}) ||     // top
-               this.lineIntersectsLine(p1, p2, {x: rectRight, y: rectTop}, {x: rectRight, y: rectBottom}) ||  // right
-               this.lineIntersectsLine(p1, p2, {x: rectRight, y: rectBottom}, {x: rectLeft, y: rectBottom}) || // bottom
-               this.lineIntersectsLine(p1, p2, {x: rectLeft, y: rectBottom}, {x: rectLeft, y: rectTop}) ||     // left
-               (this.pointIntersectsRect(p1, rect) || this.pointIntersectsRect(p2, rect)); // endpoints inside rect
-    }
-    
-    lineIntersectsLine(p1, p2, p3, p4) {
-        // Check if line segment p1-p2 intersects with line segment p3-p4
-        const denom = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
-        if (denom === 0) return false; // parallel lines
-        
-        const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denom;
-        const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denom;
-        
-        return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
-    }
-    
-    handleEndpointDrag() {
-        if (!this.selectedPath || !this.selectedEndpoint) return;
-        
-        const newPoint = { ...this.mousePos };
-        
-        // Keep endpoint within canvas bounds
-        newPoint.x = Math.max(0, Math.min(this.canvas.width, newPoint.x));
-        newPoint.y = Math.max(0, Math.min(this.canvas.height, newPoint.y));
-        
-        // Check for collisions with objects and obstacles
-        const collision = this.checkPathCollision(newPoint, this.selectedPath);
-        if (collision) {
-            // Show warning but allow movement (don't block it completely)
-            this.showInfoMessage(`Cannot move path endpoint over ${collision.type}: ${collision.item.name || 'item'}`, 'warning');
-            return;
-        }
-        
-        // Update the endpoint position
-        if (this.selectedEndpoint === 'start') {
-            this.selectedPath.points[0] = newPoint;
-        } else if (this.selectedEndpoint === 'end') {
-            this.selectedPath.points[this.selectedPath.points.length - 1] = newPoint;
-        }
-        
-        // Recalculate path length and update analytics
-        this.selectedPath.length = this.calculatePathLength(this.selectedPath.points);
+    handleGenerateAutoPath() {
+        if (!this.autoPathStartEl || !this.autoPathEndEl) return;
+        const startId = parseFloat(this.autoPathStartEl.value);
+        const endId = parseFloat(this.autoPathEndEl.value);
+        if (!startId || !endId || startId === endId) { this.showInfoMessage('Select two different objects.','warning'); return; }
+        const startObj = this.objects.find(o => o.id === startId);
+        const endObj = this.objects.find(o => o.id === endId);
+        if (!startObj || !endObj) { this.showInfoMessage('Objects not found.','error'); return; }
+        const cellSize = Math.max(5, parseInt(this.autoPathCellSizeEl?.value)||20);
+        const proxWeight = Math.max(0, parseFloat(this.autoPathProximityEl?.value)||0);
+        const smoothingMode = this.autoPathSmoothingEl?.value || 'rounded';
+        const route = this.computeAutoRoute(startObj, endObj, { cellSize, proxWeight });
+        if (!route || route.length < 2) { this.showInfoMessage('No path found.','error'); return; }
+        let smooth = route;
+        if (smoothingMode === 'rounded') smooth = this.smoothPolyline(route);
+        else if (smoothingMode === 'catmull') smooth = this.catmullRomSpline(route, 8);
+        const color = '#0074D9';
+        const path = { id: Date.now()+Math.random(), auto: true, points: smooth, description: `${startObj.name} → ${endObj.name}`, frequency: 1, color, length: this.calculatePathLength(smooth) };
+        this.paths.push(path);
+        this.updateObjectVisits(path);
         this.updateAnalytics();
-        
         this.render();
+        this.showInfoMessage('Auto path added.','success');
     }
-    
-    updateObjectVisits(path) {
-        const startObject = this.getObjectAt(path.points[0]);
-        const endObject = this.getObjectAt(path.points[path.points.length - 1]);
-        
-        if (startObject) {
-            startObject.visits = (startObject.visits || 0) + path.frequency;
-        }
-        if (endObject) {
-            endObject.visits = (endObject.visits || 0) + path.frequency;
-        }
-    }
-
-    render() {
-        // Clear canvas
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        // Apply pan (in screen pixels) then zoom for all rendering
-        this.ctx.save();
-        this.ctx.translate(this.pan.x, this.pan.y);
-        this.ctx.scale(this.zoom || 1, this.zoom || 1);
-        const bgSource = this.backgroundPdfPageCanvas || this.backgroundImage;
-        if (bgSource) {
-            this.drawBackgroundWithTransform(bgSource);
-            
-            // Add visual confirmation in canvas info
-            const infoEl = document.getElementById('canvasInfo');
-            if (infoEl && !infoEl.textContent.includes('Background loaded')) {
-                const bgType = this.backgroundPdfPageCanvas ? 'PDF' : 'Image';
-                infoEl.textContent = `Background loaded: ${bgType}. ${infoEl.textContent}`;
-            }
-        } else {
-            // Remove background indicator if no background
-            const infoEl = document.getElementById('canvasInfo');
-            if (infoEl && infoEl.textContent.includes('Background loaded')) {
-                infoEl.textContent = infoEl.textContent.replace(/Background loaded: \w+\. /, '');
-            }
-        }
-        
-        // Draw grid
-        this.drawGrid();
-        
-        // Draw calibration points/line if calibrating (in world coordinates)
-        if (this.isCalibrating && this.calibrationPoints.length > 0) {
-            this.ctx.save();
-            this.ctx.fillStyle = '#6c5ce7';
-            this.ctx.strokeStyle = '#6c5ce7';
-            for (const p of this.calibrationPoints) {
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-                this.ctx.fill();
-            }
-            this.ctx.setLineDash([6,4]);
-            this.ctx.lineWidth = 2;
-            if (this.calibrationPoints.length === 2) {
-                this.ctx.beginPath();
-                this.ctx.moveTo(this.calibrationPoints[0].x, this.calibrationPoints[0].y);
-                this.ctx.lineTo(this.calibrationPoints[1].x, this.calibrationPoints[1].y);
-                this.ctx.stroke();
-            } else if (this.calibrationPoints.length === 1) {
-                // Provisional line to current mouse position
-                this.ctx.beginPath();
-                this.ctx.moveTo(this.calibrationPoints[0].x, this.calibrationPoints[0].y);
-                this.ctx.lineTo(this.mousePos.x, this.mousePos.y);
-                this.ctx.stroke();
-            }
-            this.ctx.restore();
-        }
-        
-        // Draw zones (under paths and objects)
-        this.zones.forEach(zone => this.drawZone(zone));
-        
-        // Draw obstacles
-        this.obstacles.forEach(obstacle => this.drawObstacle(obstacle));
-        
-        // Draw paths
-        this.paths.forEach(path => this.drawPath(path));
-        
-        // Draw objects
-        this.objects.forEach(obj => this.drawObject(obj));
-        
-        // Draw current path being drawn
-        if (this.isDrawing && this.currentTool === 'path' && this.currentPath.length > 1) {
-            this.drawPath({ points: this.currentPath, color: '#FFA500' });
-        }
-        
-        // Draw current zone being drawn
-        if (this.isDrawing && this.currentTool === 'zone' && this.currentZone) {
-            this.drawZone(this.currentZone, true);
-        }
-        
-        // Draw current obstacle being drawn
-        if (this.isDrawing && this.currentTool === 'obstacle' && this.currentObstacle) {
-            this.drawObstacle(this.currentObstacle, true);
-        }
-        
-        // Draw selection handles if an object is selected
-        if (this.selectedObject) {
-            this.drawSelectionHandles(this.selectedObject);
-        }
-        
-        // Draw path endpoint handles if a path is selected
-        if (this.selectedPath) {
-            this.drawPathEndpointHandles(this.selectedPath);
-        }
-        
-        // After existing drawing of objects/paths etc add selection handles for zone/obstacle
-        // (object handles already drawn where selectedObject)
-        if (this.selectedZone) { this.drawSelectionHandles(this.selectedZone); }
-        if (this.selectedObstacle) { this.drawSelectionHandles(this.selectedObstacle); }
-        
-        // Restore zoom transform
-        this.ctx.restore();
-    }
-
-    drawBackgroundWithTransform(source) {
-        if (!this.backgroundRect) return;
-        const { rotation, flipH, flipV } = this.backgroundTransform;
-        const rect = this.backgroundRect;
-        this.ctx.save();
-        if (rotation !== 0 || flipH || flipV) {
-            const cx = rect.x + rect.width / 2;
-            const cy = rect.y + rect.height / 2;
-            this.ctx.translate(cx, cy);
-            if (rotation) this.ctx.rotate((rotation % 360) * Math.PI / 180);
-            this.ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-            this.ctx.drawImage(source, -rect.width / 2, -rect.height / 2, rect.width, rect.height);
-        } else {
-            this.ctx.drawImage(source, rect.x, rect.y, rect.width, rect.height);
-        }
-        this.ctx.restore();
-    }
-    
-    drawGrid() {
-        // Grid is rendered AFTER background (in render()) so it visually overlays the image/PDF.
-        // It does NOT rotate with the background; rotation applies only to the background image so the grid remains a stable reference layer.
-        // Determine pixel spacing from real unit per cell if scale is set
-        let gridSizePx = 20;
-        if (this.unitsPerPixel > 0 && this.gridCellUnits > 0) {
-            gridSizePx = this.gridCellUnits / this.unitsPerPixel;
-            // Clamp to reasonable pixel sizes
-            gridSizePx = Math.max(8, Math.min(200, gridSizePx));
-        }
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = '#f0f0f0';
-        
-        for (let x = 0; x < this.canvas.width; x += gridSizePx) {
-            this.ctx.moveTo(x, 0);
-            this.ctx.lineTo(x, this.canvas.height);
-        }
-        
-        for (let y = 0; y < this.canvas.height; y += gridSizePx) {
-            this.ctx.moveTo(0, y);
-            this.ctx.lineTo(this.canvas.width, y);
-        }
-        
-        this.ctx.stroke();
-        
-        // Display grid scale info below grid (in UI element)
-        const gridInfoEl = document.getElementById('gridScaleInfo');
-        if (gridInfoEl) {
-            if (this.unitsPerPixel > 0) {
-                const unitsPerCell = this.unitsPerPixel * gridSizePx;
-                gridInfoEl.textContent = `Grid: ${unitsPerCell.toFixed(3)} ${this.units} per cell`;
-            } else {
-                gridInfoEl.textContent = 'Grid scale not set';
-            }
-        }
-    }
-
-    drawObject(obj) {
-        this.ctx.fillStyle = obj.color;
-        this.ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
-        
-        this.ctx.strokeStyle = '#000';
-        this.ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
-        
-        // Draw object name
-        this.ctx.fillStyle = '#000';
-        this.ctx.textAlign = 'center';
-        this.ctx.font = '12px Arial';
-        this.ctx.fillText(obj.name, obj.x + obj.width / 2, obj.y - 5);
-    }
-
-    drawPath(path) {
-        if (path.points.length < 2) return;
-        
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = path.color;
-        this.ctx.lineWidth = path.frequency ? Math.min(1 + path.frequency / 2, 10) : 2;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        
-        this.ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < path.points.length; i++) {
-            this.ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
-        this.ctx.stroke();
-    }
-
-    drawObstacle(obstacle, isDrawing = false) {
-        this.ctx.fillStyle = isDrawing ? 'rgba(255, 0, 0, 0.2)' : 'rgba(255, 0, 0, 0.4)';
-        this.ctx.strokeStyle = '#FF0000';
-        this.ctx.lineWidth = 1;
-        
-        const x = obstacle.width < 0 ? obstacle.x + obstacle.width : obstacle.x;
-        const y = obstacle.height < 0 ? obstacle.y + obstacle.height : obstacle.y;
-        const w = Math.abs(obstacle.width);
-        const h = Math.abs(obstacle.height);
-        
-        this.ctx.fillRect(x, y, w, h);
-        this.ctx.strokeRect(x, y, w, h);
-    }
-
-    drawZone(zone, isDrawing = false) {
-        // Colors based on type
-        const type = zone.type || 'green';
-        const fill = type === 'restricted' ? (isDrawing ? 'rgba(255,0,0,0.15)' : 'rgba(255,0,0,0.25)') : (isDrawing ? 'rgba(0,200,0,0.12)' : 'rgba(0,200,0,0.22)');
-        const stroke = type === 'restricted' ? '#ff0000' : '#00a000';
-        this.ctx.fillStyle = fill;
-        this.ctx.strokeStyle = stroke;
-        this.ctx.lineWidth = 2;
-        const x = zone.width < 0 ? zone.x + zone.width : zone.x;
-        const y = zone.height < 0 ? zone.y + zone.height : zone.y;
-        const w = Math.abs(zone.width);
-        const h = Math.abs(zone.height);
-        this.ctx.fillRect(x, y, w, h);
-        this.ctx.strokeRect(x, y, w, h);
-        // Label
-        if (zone.name) {
-            this.ctx.fillStyle = '#000';
-            this.ctx.font = '12px Arial';
-            this.ctx.textAlign = 'left';
-            this.ctx.fillText(`${zone.name}`, x + 4, y + 14);
-        }
-    }
-
-    drawSelectionHandles(obj) {
-        const handleSize = 8 / (this.zoom || 1);
-        this.ctx.strokeStyle = '#007bff';
-        this.ctx.lineWidth = 1 / (this.zoom || 1);
-        this.ctx.setLineDash([5 / (this.zoom || 1), 5 / (this.zoom || 1)]);
-        this.ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
-        this.ctx.setLineDash([]);
-
-        this.ctx.fillStyle = '#FFF';
-        this.ctx.strokeStyle = '#007bff';
-
-        const handles = this.getResizeHandles(obj);
-        for (const handle in handles) {
-            const pos = handles[handle];
-            this.ctx.fillRect(pos.x - handleSize / 2, pos.y - handleSize / 2, handleSize, handleSize);
-            this.ctx.strokeRect(pos.x - handleSize / 2, pos.y - handleSize / 2, handleSize, handleSize);
-        }
-    }
-
-    getResizeHandles(obj) {
-        return {
-            'nw': { x: obj.x, y: obj.y },
-            'ne': { x: obj.x + obj.width, y: obj.y },
-            'sw': { x: obj.x, y: obj.y + obj.height },
-            'se': { x: obj.x + obj.width, y: obj.y + obj.height },
-            'n': { x: obj.x + obj.width / 2, y: obj.y },
-            's': { x: obj.x + obj.width / 2, y: obj.y + obj.height },
-            'w': { x: obj.x, y: obj.y + obj.height / 2 },
-            'e': { x: obj.x + obj.width, y: obj.y + obj.height / 2 }
+    computeAutoRoute(startObj, endObj, opts={}) {
+        const padding = 40;
+        const cell = Math.max(5, opts.cellSize || 20);
+        const proxWeight = opts.proxWeight || 0; // cost scale for proximity
+        const blockedRects = [...this.objects, ...this.obstacles, ...this.zones.filter(z=>z.type==='restricted')];
+        const items = blockedRects;
+        const minX = Math.max(0, Math.min(startObj.x, endObj.x, ...items.map(i=>i.x)) - padding);
+        const minY = Math.max(0, Math.min(startObj.y, endObj.y, ...items.map(i=>i.y)) - padding);
+        const maxX = Math.max(startObj.x+startObj.width, endObj.x+endObj.width, ...items.map(i=>i.x+i.width)) + padding;
+        const maxY = Math.max(startObj.y+startObj.height, endObj.y+endObj.height, ...items.map(i=>i.y+i.height)) + padding;
+        const cols = Math.ceil((maxX - minX) / cell);
+        const rows = Math.ceil((maxY - minY) / cell);
+        const grid = new Array(rows).fill(0).map(()=>new Array(cols).fill(0));
+        const markBlocked = (rX, rY, rW, rH) => {
+            const c1 = Math.floor((rX - minX)/cell); const c2 = Math.floor((rX + rW - minX)/cell);
+            const r1 = Math.floor((rY - minY)/cell); const r2 = Math.floor((rY + rH - minY)/cell);
+            for (let r=r1; r<=r2; r++) for (let c=c1; c<=c2; c++) if (r>=0&&r<rows&&c>=0&&c<cols) grid[r][c]=1;
         };
-    }
-    
-    drawPathEndpointHandles(path) {
-        if (path.points.length < 2) return;
-        
-        const handleRadius = 6;
-        
-        // Highlight the entire path when selected
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = '#28a745';
-        this.ctx.lineWidth = Math.max(4, (path.frequency ? Math.min(1 + path.frequency / 2, 10) : 2) + 2);
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.setLineDash([5, 5]);
-        
-        this.ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < path.points.length; i++) {
-            this.ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-        
-        // Draw start endpoint handle
-        const startPoint = path.points[0];
-        this.ctx.beginPath();
-        this.ctx.arc(startPoint.x, startPoint.y, handleRadius, 0, 2 * Math.PI);
-        this.ctx.fillStyle = '#28a745';
-        this.ctx.fill();
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = 2;
-        this.ctx.stroke();
-        
-        // Add "S" for start
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 10px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('S', startPoint.x, startPoint.y + 3);
-        
-        // Draw end endpoint handle
-        const endPoint = path.points[path.points.length - 1];
-        this.ctx.beginPath();
-        this.ctx.arc(endPoint.x, endPoint.y, handleRadius, 0, 2 * Math.PI);
-        this.ctx.fillStyle = '#dc3545';
-        this.ctx.fill();
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = 2;
-        this.ctx.stroke();
-        
-        // Add "E" for end
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 10px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('E', endPoint.x, endPoint.y + 3);
-    }
-
-    calculatePathLength(points) {
-        let length = 0;
-        for (let i = 1; i < points.length; i++) {
-            const dx = points[i].x - points[i-1].x;
-            const dy = points[i].y - points[i-1].y;
-            length += Math.sqrt(dx*dx + dy*dy);
-        }
-        return length;
-    }
-
-    updateAnalytics() {
-        // Reset and recalculate object visits from scratch based on current paths
-        this.objects.forEach(obj => obj.visits = 0);
-        this.paths.forEach(path => this.updateObjectVisits(path));
-
-        const totalPaths = this.paths.length;
-        const totalDistancePx = this.paths.reduce((sum, path) => sum + path.length, 0);
-        const weightedCost = this.paths.reduce((sum, path) => sum + (path.length * path.frequency), 0);
-        const avgPathLengthPx = totalPaths > 0 ? totalDistancePx / totalPaths : 0;
-
-        // Update existing px metrics
-        document.getElementById('totalPaths').textContent = totalPaths;
-        document.getElementById('totalDistance').textContent = `${Math.round(totalDistancePx)} px`;
-        document.getElementById('weightedCost').textContent = Math.round(weightedCost);
-        document.getElementById('avgPathLength').textContent = `${Math.round(avgPathLengthPx)} px`;
-
-        // New units + steps metrics
-        const unitsLabelEl = document.getElementById('totalDistanceUnitsLabel');
-        const unitsValEl = document.getElementById('totalDistanceUnits');
-        const stepsValEl = document.getElementById('totalSteps');
-        if (unitsLabelEl) unitsLabelEl.textContent = `Total Distance (${this.units})`;
-        if (this.unitsPerPixel > 0) {
-            const totalDistanceUnits = totalDistancePx * this.unitsPerPixel;
-            if (unitsValEl) unitsValEl.textContent = `${totalDistanceUnits.toFixed(2)} ${this.units}`;
-            if (stepsValEl) stepsValEl.textContent = `${(totalDistanceUnits * (this.stepsPerUnit || 0)).toFixed(0)}`;
-        } else {
-            if (unitsValEl) unitsValEl.textContent = `0 ${this.units}`;
-            if (stepsValEl) stepsValEl.textContent = '0';
-        }
-
-        this.updateHotspotList();
-    }
-    
-    beginCalibration() {
-        this.isCalibrating = true;
-        this.calibrationPoints = [];
-        this.showInfoMessage('Calibration: click two points with a known real distance.', 'info');
-        // Ensure modal shows the correct units label
-        const unitsEl = document.getElementById('calibrateUnits');
-        if (unitsEl) unitsEl.textContent = this.units;
-        this.updateCalibrateInfo(0);
-    }
-
-    handleCalibrationClick() {
-        // Debounce identical consecutive clicks
-        const last = this.calibrationPoints[this.calibrationPoints.length - 1];
-        if (last && Math.hypot(this.mousePos.x - last.x, this.mousePos.y - last.y) < 2) return;
-        
-        this.calibrationPoints.push({ x: this.mousePos.x, y: this.mousePos.y });
-        if (this.calibrationPoints.length === 2) {
-            const dx = this.calibrationPoints[1].x - this.calibrationPoints[0].x;
-            const dy = this.calibrationPoints[1].y - this.calibrationPoints[0].y;
-            const pxDist = Math.sqrt(dx*dx + dy*dy);
-            if (pxDist <= 0.0001) {
-                this.showInfoMessage('Calibration points are too close. Please click points farther apart.', 'warning');
-                this.calibrationPoints = [];
-                return;
-            }
-            // Open calibration modal with measured px distance
-            this.openCalibrateModal(pxDist);
-        }
-    }
-
-    resetScale() {
-        this.units = this.units || 'ft';
-        this.unitsPerPixel = 0;
-        this.stepsPerUnit = 0;
-        this.gridCellUnits = 1;
-        this.isCalibrating = false;
-        this.calibrationPoints = [];
-        this.saveScaleToStorage();
-        this.updateScaleUI();
-        this.updateAnalytics();
-        this.render();
-    }
-
-    updateScaleUI() {
-        const unitsSelect = document.getElementById('unitsSelect');
-        const stepsPerUnitInput = document.getElementById('stepsPerUnit');
-        const gridCellUnitsInput = document.getElementById('gridCellUnits');
-        if (unitsSelect) unitsSelect.value = this.units;
-        if (stepsPerUnitInput) stepsPerUnitInput.value = this.stepsPerUnit || '';
-        if (gridCellUnitsInput) gridCellUnitsInput.value = this.gridCellUnits || 1;
-    }
-
-    openCalibrateModal(pxDist) {
-        const modal = document.getElementById('calibrateModal');
-        if (!modal) {
-            // Fallback to prompt if modal missing
-            const distanceStr = prompt(`Enter real distance between points in ${this.units}:`, '10');
-            const realDistance = distanceStr ? parseFloat(distanceStr) : NaN;
-            if (!isNaN(realDistance) && realDistance > 0) {
-                this.unitsPerPixel = realDistance / pxDist;
-                this.saveScaleToStorage();
-                this.updateScaleUI();
-                this.updateAnalytics();
-                this.render();
-                this.showInfoMessage(`Scale set: ${this.unitsPerPixel.toFixed(4)} ${this.units}/px`, 'success');
-            } else {
-                this.showInfoMessage('Calibration canceled or invalid distance.', 'warning');
-            }
-            this.isCalibrating = false;
-            this.calibrationPoints = [];
-            return;
-        }
-        this._pendingPxDist = pxDist;
-                             this.updateCalibrateInfo(pxDist);
-        modal.classList.remove('hidden');
-        const input = document.getElementById('calibrateDistance');
-        if (input) { input.value = ''; input.focus(); }
-    }
-
-    closeCalibrateModal() {
-        const modal = document.getElementById('calibrateModal');
-        if (modal) modal.classList.add('hidden');
-        this.isCalibrating = false;
-        this.calibrationPoints = [];
-        this._pendingPxDist = undefined;
-    }
-
-    updateCalibrateInfo(pxDist) {
-        const infoEl = document.getElementById('calibrateInfo');
-        if (infoEl) infoEl.textContent = `Measured pixel distance: ${pxDist.toFixed ? pxDist.toFixed(2) : pxDist} px`;
-        const unitsEl = document.getElementById('calibrateUnits');
-        if (unitsEl) unitsEl.textContent = this.units;
-    }
-
-    applyCalibrationFromModal() {
-        const input = document.getElementById('calibrateDistance');
-        const raw = input ? String(input.value).trim() : '';
-        const val = parseFloat(raw);
-        if (!raw || isNaN(val) || val <= 0) {
-            this.showInfoMessage('Please enter a valid distance greater than zero.', 'warning');
-            if (input) input.focus();
-            return;
-        }
-        const pxDist = this._pendingPxDist || 0;
-        if (pxDist <= 0.0001) {
-
-            this.showInfoMessage('Calibration points are invalid. Please redo calibration.', 'warning');
-            this.closeCalibrateModal();
-            return;
-        }
-        this.unitsPerPixel = val / pxDist;
-        this.saveScaleToStorage();
-        this.updateScaleUI();
-        this.updateAnalytics();
-        this.render();
-        this.showInfoMessage(`Scale set: ${this.unitsPerPixel.toFixed(4)} ${this.units}/px`, 'success');
-        this.closeCalibrateModal();
-    }
-
-    saveScaleToStorage() {
-        try {
-            const payload = {
-                units: this.units,
-                unitsPerPixel: this.unitsPerPixel,
-                stepsPerUnit: this.stepsPerUnit,
-                gridCellUnits: this.gridCellUnits,
-                zoom: this.zoom || 1
-            };
-            localStorage.setItem('spaghetti.scale', JSON.stringify(payload));
-        } catch (_) {}
-    }
-
-    loadScaleFromStorage() {
-        try {
-            const raw = localStorage.getItem('spaghetti.scale');
-            if (raw) {
-                const data = JSON.parse(raw);
-                if (data && typeof data === 'object') {
-                    if (data.units) this.units = data.units;
-                    if (typeof data.unitsPerPixel === 'number') this.unitsPerPixel = data.unitsPerPixel;
-                    if (typeof data.stepsPerUnit === 'number') this.stepsPerUnit = data.stepsPerUnit;
-                    if (typeof data.gridCellUnits === 'number') this.gridCellUnits = data.gridCellUnits;
-                    // Don't load zoom/pan on initialization - let resetView() handle this
-                    // if (typeof data.zoom === 'number') this.zoom = data.zoom;
+        blockedRects.forEach(o=>markBlocked(o.x-6,o.y-6,o.width+12,o.height+12));
+        // Precompute proximity field if needed
+        let prox=null; if (proxWeight>0){
+            prox = new Array(rows).fill(0).map(()=>new Array(cols).fill(0));
+            const maxDistCells = 6; // influence radius
+            for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
+                if (grid[r][c]===1){ prox[r][c]=1; continue; }
+                let best = maxDistCells+1;
+                for (let rr=Math.max(0,r-maxDistCells); rr<=Math.min(rows-1,r+maxDistCells); rr++) {
+                    for (let cc=Math.max(0,c-maxDistCells); cc<=Math.min(cols-1,c+maxDistCells); cc++) {
+                        if (grid[rr][cc]===1) {
+                            const d = Math.max(Math.abs(rr-r), Math.abs(cc-c));
+                            if (d<best) best=d;
+                        }
+                    }
                 }
-            }
-        } catch (_) {}
-    }
-    
-    updateHotspotList() {
-        const hotspotList = document.getElementById('hotspotList');
-        hotspotList.innerHTML = '';
-
-        const visitCounts = {};
-        this.objects.forEach(obj => {
-            visitCounts[obj.name] = obj.visits || 0;
-        });
-
-        const sortedHotspots = Object.entries(visitCounts)
-            .sort(([,a],[,b]) => b-a)
-            .filter(([,count]) => count > 0)
-            .slice(0, 5);
-
-        if (sortedHotspots.length === 0) {
-            hotspotList.innerHTML = '<div class="empty-state">No paths drawn yet</div>';
-            return;
-        }
-
-        sortedHotspots.forEach(([name, count]) => {
-            const item = document.createElement('div');
-            item.className = 'hotspot-item';
-            item.innerHTML = `<span>${name}</span> <span>${count} visits</span>`;
-            hotspotList.appendChild(item);
-        });
-    }
-
-    // Delete hover functionality methods
-    handleDeleteMouseMove(e) {
-        const point = this.mousePos;
-        let hoveredItem = null;
-        let hoverType = null;
-        let hoverName = null;
-
-        // Check for objects first, as they are on top
-        const hoveredObject = this.getObjectAt(point);
-        if (hoveredObject) {
-            hoveredItem = hoveredObject;
-            hoverType = 'object';
-            hoverName = hoveredObject.name;
-        } else {
-            // Check for paths
-            const hoveredPath = this.getPathAt(point);
-            if (hoveredPath) {
-                hoveredItem = hoveredPath;
-                hoverType = 'path';
-                hoverName = hoveredPath.description || 'Unnamed Path';
-            } else {
-                // Check for obstacles
-                const hoveredObstacle = this.getObstacleAt(point);
-                if (hoveredObstacle) {
-                    hoveredItem = hoveredObstacle;
-                    hoverType = 'obstacle';
-                    hoverName = 'Obstacle';
-                }
+                if (best<=maxDistCells) prox[r][c] = (maxDistCells - best)/maxDistCells; else prox[r][c]=0;
             }
         }
-
-        // Update hover state
-        if (hoveredItem && hoveredItem !== this.hoveredDeleteItem) {
-            this.hoveredDeleteItem = hoveredItem;
-            this.showDeleteTooltip(e, hoverType, hoverName);
-            // Set highlight state and re-render so it draws in transformed space
-            this.deleteHighlight = { item: hoveredItem, type: hoverType };
-            this.render();
-        } else if (!hoveredItem && this.hoveredDeleteItem) {
-            this.hoveredDeleteItem = null;
-            this.deleteHighlight = null;
-            this.hideDeleteTooltip();
-            this.render(); // Remove highlighting
-        } else if (hoveredItem === this.hoveredDeleteItem) {
-            // Update tooltip position
-            this.updateDeleteTooltipPosition(e);
-        }
-    }
-    
-    showDeleteTooltip(e, type, name) {
-        this.hideDeleteTooltip();
-        
-        this.deleteTooltip = document.createElement('div');
-        this.deleteTooltip.className = 'delete-tooltip';
-        this.deleteTooltip.innerHTML = `
-            <div class="delete-tooltip-content">
-                <span class="delete-tooltip-icon">🗑️</span>
-                <span class="delete-tooltip-text">Delete ${type}: <strong>${name}</strong></span>
-            </div>
-        `;
-        
-        document.body.appendChild(this.deleteTooltip);
-        this.updateDeleteTooltipPosition(e);
-    }
-    
-    updateDeleteTooltipPosition(e) {
-        if (!this.deleteTooltip) return;
-        
-        const tooltip = this.deleteTooltip;
-        const offset = 15;
-        
-        // Position tooltip to the right and below cursor
-        let x = e.clientX + offset;
-        let y = e.clientY + offset;
-        
-        // Prevent tooltip from going off screen
-        const rect = tooltip.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        
-        if (x + rect.width > viewportWidth) {
-            x = e.clientX - rect.width - offset;
-        }
-        if (y + rect.height > viewportHeight) {
-            y = e.clientY - rect.height - offset;
-        }
-        
-        tooltip.style.left = `${x}px`;
-        tooltip.style.top = `${y}px`;
-    }
-    
-    hideDeleteTooltip() {
-        if (this.deleteTooltip) {
-            this.deleteTooltip.remove();
-            this.deleteTooltip = null;
-        }
-    }
-    
-    highlightDeleteTarget(obj, type) {
-        // Fixed: was referencing undefined variable `item`
-        this.deleteHighlight = { item: obj, type };
-        this.render();
-    }
-    
-    drawDeleteHighlight(obj) {
-        const padding = 4;
-        this.ctx.strokeStyle = '#ff4757';
-        this.ctx.lineWidth = 3;
-        this.ctx.setLineDash([8, 4]);
-        this.ctx.strokeRect(
-            obj.x - padding, 
-            obj.y - padding, 
-            obj.width + padding * 2, 
-            obj.height + padding * 2
-        );
-        this.ctx.setLineDash([]);
-        
-        // Add pulsing effect background
-        this.ctx.fillStyle = 'rgba(255, 71, 87, 0.1)';
-        this.ctx.fillRect(
-            obj.x - padding, 
-            obj.y - padding, 
-            obj.width + padding * 2, 
-            obj.height + padding * 2
-        );
-    }
-    
-    drawPathDeleteHighlight(path) {
-        if (path.points.length < 2) return;
-        
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = '#ff4757';
-        this.ctx.lineWidth = Math.max(6, (path.frequency ? Math.min(1 + path.frequency / 2, 10) : 2) + 3);
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.setLineDash([10, 5]);
-        
-        this.ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < path.points.length; i++) {
-            this.ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-    }
-    
-    drawObstacleDeleteHighlight(obstacle) {
-        const padding = 4;
-        this.ctx.fillStyle = 'rgba(255, 71, 87, 0.2)';
-        this.ctx.strokeStyle = '#ff4757';
-        this.ctx.lineWidth = 3;
-        this.ctx.setLineDash([8, 4]);
-        
-        const x = obstacle.width < 0 ? obstacle.x + obstacle.width : obstacle.x;
-        const y = obstacle.height < 0 ? obstacle.y + obstacle.height : obstacle.y;
-        const w = Math.abs(obstacle.width);
-        const h = Math.abs(obstacle.height);
-        
-        this.ctx.fillRect(x - padding, y - padding, w + padding * 2, h + padding * 2);
-        this.ctx.strokeRect(x - padding, y - padding, w + padding * 2, h + padding * 2);
-        this.ctx.setLineDash([]);
-    }
-
-    // Background transformation methods
-    rotateBackground(degrees) {
-        // Normalize to quarter turns and prevent double-trigger issues.
-        // If a UI event accidentally fires twice quickly, collapse to a single 90° step.
-        const step = degrees > 0 ? 90 : -90; // enforce 90° increments
-        this.backgroundTransform.rotation = (this.backgroundTransform.rotation + step) % 360;
-        if (this.backgroundTransform.rotation < 0) this.backgroundTransform.rotation += 360;
-        this.render();
-    }
-
-    flipBackground(direction) {
-        if (direction === 'h') {
-            this.backgroundTransform.flipH = !this.backgroundTransform.flipH;
-        } else if (direction === 'v') {
-            this.backgroundTransform.flipV = !this.backgroundTransform.flipV;
-        }
-        this.render();
-    }
-
-    resetBackgroundTransform() {
-        this.backgroundTransform = { rotation: 0, flipH: false, flipV: false };
-        this.render();
-    }
-
-    setZoom(newZoom, anchorX, anchorY) {
-        const oldZoom = this.zoom || 1;
-        newZoom = Math.max(0.05, Math.min(20, newZoom));
-        if (!anchorX && !anchorY) {
-            // center of canvas as default anchor
-            anchorX = this.canvas.width / 2;
-            anchorY = this.canvas.height / 2;
-        }
-        // Compute world point under anchor before zoom
-        const worldX = (anchorX - this.pan.x) / oldZoom;
-        const worldY = (anchorY - this.pan.y) / oldZoom;
-        this.zoom = newZoom;
-        // Adjust pan so the same world point stays under cursor
-        this.pan.x = anchorX - worldX * this.zoom;
-        this.pan.y = anchorY - worldY * this.zoom;
-        this._userViewportChanged = true;
-        this._updateZoomUI();
-        this.render();
-    }
-    
-    _updateZoomUI() {
-        const btn = document.getElementById('resetZoom');
-        if (btn) btn.textContent = `${Math.round((this.zoom || 1) * 100)}%`;
-    }
-    
-    fitBackground() {
-        if (!this.backgroundRect) { this.render(); return; }
-        const bw = this.backgroundRect.width;
-        const bh = this.backgroundRect.height;
-        if (bw <= 0 || bh <= 0) { this.zoom = 1; this.pan = { x:0, y:0 }; this._updateZoomUI(); this.render(); return; }
-        const margin = 0.95;
-        this.zoom = Math.min(this.canvas.width / bw, this.canvas.height / bh) * margin;
-        const screenBw = bw * this.zoom;
-        const screenBh = bh * this.zoom;
-        this.pan.x = (this.canvas.width - screenBw) / 2 - this.backgroundRect.x * this.zoom;
-        this.pan.y = (this.canvas.height - screenBh) / 2 - this.backgroundRect.y * this.zoom;
-        this._userViewportChanged = false;
-        this._updateZoomUI();
-        this.render();
-    }
-    
-    resetView() {
-        if (this.backgroundRect) { this.fitBackground(); return; }
-        this.zoom = 1;
-        this.pan = { x: 0, y: 0 };
-        this._userViewportChanged = false;
-        this._updateZoomUI();
-        this.render();
-    }
-
-    // Missing methods that were being called
-    clearAll() {
-        if (this.objects.length === 0 && this.paths.length === 0 && this.obstacles.length === 0) {
-            this.showInfoMessage('Nothing to clear!', 'info');
-            return;
-        }
-        this.showDeleteConfirmation(null, 'all');
-    }
-
-    clearAllData() {
-        this.objects = [];
-        this.paths = [];
-        this.obstacles = [];
-        this.selectedObject = null;
-        this.selectedPath = null;
-        this.currentPath = [];
-        this.currentObstacle = null;
-        this.updateAnalytics();
-        this.render();
-        this.showInfoMessage('All data cleared successfully.', 'success');
-    }
-
-    exportData() {
-        const data = {
-            version: '1.0',
-            timestamp: new Date().toISOString(),
-            objects: this.objects,
-            paths: this.paths,
-            zones: this.zones,
-            obstacles: this.obstacles,
-            scale: {
-                units: this.units,
-                unitsPerPixel: this.unitsPerPixel,
-                stepsPerUnit: this.stepsPerUnit,
-                gridCellUnits: this.gridCellUnits
-            },
-            backgroundTransform: this.backgroundTransform
-        };
-
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `spaghetti-diagram-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        this.showInfoMessage('Data exported successfully!', 'success');
-    }
-
-    showDeleteConfirmation(item, type) {
-        this.itemToDelete = { item, type };
-        const modal = document.getElementById('deleteModal');
-        const message = document.getElementById('deleteMessage');
-        const warning = document.getElementById('deleteWarning');
-
-        if (type === 'all') {
-            message.textContent = 'Are you sure you want to clear all objects, paths, and obstacles? This action cannot be undone.';
-            warning.classList.add('hidden');
-        } else {
-            const name = item.name || item.description || `this ${type}`;
-            message.textContent = `Are you sure you want to delete \"${name}\"? This action cannot be undone.`;
-
-            if (type === 'object') {
-                // Check for connected paths
-                const connectedPaths = this.paths.filter(path => {
-                    const startObj = this.getObjectAt(path.points[0]);
-                    const endObj = this.getObjectAt(path.points[path.points.length - 1]);
-                    return startObj === item || endObj === item;
-                });
-                if (connectedPaths.length > 0) {
-                    warning.textContent = `Warning: Deleting this object will also remove ${connectedPaths.length} connected path(s).`;
-                    warning.classList.remove('hidden');
-                } else {
-                    warning.classList.add('hidden');
-                }
-            } else if (type === 'zone') {
-                warning.textContent = '';
-                warning.classList.add('hidden');
-            } else {
-                warning.classList.add('hidden');
+        const start = { x: startObj.x + startObj.width/2, y: startObj.y + startObj.height/2 };
+        const end = { x: endObj.x + endObj.width/2, y: endObj.y + endObj.height/2 };
+        const startNode = { c: Math.floor((start.x - minX)/cell), r: Math.floor((start.y - minY)/cell) };
+        const endNode = { c: Math.floor((end.x - minX)/cell), r: Math.floor((end.y - minY)/cell) };
+        const inside = (r,c)=> r>=0&&r<rows&&c>=0&&c<cols && grid[r][c]===0;
+        if (!inside(startNode.r,startNode.c) || !inside(endNode.r,endNode.c)) return null;
+        const h = (r,c)=> Math.hypot(c-endNode.c, r-endNode.r);
+        const open = new Map(); const key=(r,c)=>r+','+c; const gScore = new Map(); const fScore = new Map(); const came = new Map();
+        const push = (r,c,g)=>{ const f=g+h(r,c); open.set(key(r,c), {r,c,f,g}); gScore.set(key(r,c),g); fScore.set(key(r,c),f); };
+        push(startNode.r,startNode.c,0);
+        const dirs = [ [1,0],[0,1],[-1,0],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1] ];
+        while (open.size) {
+            let currentKey=null,current=null,lowest=Infinity; for (const [k,v] of open){ if (v.f<lowest){lowest=v.f;current=v;currentKey=k;} }
+            if (!current) break;
+            if (current.r===endNode.r && current.c===endNode.c) {
+                const pts=[]; let ck=currentKey;
+                while (ck){ const [rr,cc]=ck.split(',').map(Number); pts.push({x: minX+cc*cell+cell/2, y: minY+rr*cell+cell/2}); ck=came.get(ck); }
+                pts.reverse(); return pts;
+            }
+            open.delete(currentKey);
+            for (const [dr,dc] of dirs) {
+                const nr=current.r+dr, nc=current.c+dc; if (!inside(nr,nc)) continue;
+                if (dr!==0 && dc!==0) { if (!inside(current.r, nc) || !inside(nr, current.c)) continue; }
+                let stepCost = Math.hypot(dr,dc);
+                if (prox && proxWeight>0) stepCost += prox[nr][nc]*proxWeight; 
+                const tentative = current.g + stepCost;
+                const nk=key(nr,nc);
+                if (tentative < (gScore.get(nk) ?? Infinity)) { came.set(nk,currentKey); push(nr,nc,tentative); }
             }
         }
-
-        modal.classList.remove('hidden');
-        // Focus the confirm button for accessibility
-        const confirmBtn = document.getElementById('confirmDelete');
-        if (confirmBtn) confirmBtn.focus();
+        return null;
     }
-
-    confirmDelete() {
-        if (!this.itemToDelete) return;
-
-        const { item, type } = this.itemToDelete;
-
-        if (type === 'all') {
-            this.clearAllData();
-            this.closeDeleteModal();
-            return;
-        }
-
-        if (type === 'object') {
-            const index = this.objects.indexOf(item);
-            if (index > -1) {
-                this.objects.splice(index, 1);
-                // Also delete paths connected to this object
-                this.paths = this.paths.filter(path => {
-                    const startObj = this.getObjectAt(path.points[0]);
-                    const endObj = this.getObjectAt(path.points[path.points.length - 1]);
-                    return startObj !== item && endObj !== item;
-                });
-                if (this.selectedObject === item) this.selectedObject = null;
-            }
-        } else if (type === 'path') {
-            const index = this.paths.indexOf(item);
-            if (index > -1) {
-                this.paths.splice(index, 1);
-                if (this.selectedPath === item) this.selectedPath = null;
-            }
-        } else if (type === 'zone') {
-            const index = this.zones.indexOf(item);
-            if (index > -1) {
-                this.zones.splice(index, 1);
-            }
-        } else if (type === 'obstacle') {
-            const index = this.obstacles.indexOf(item);
-            if (index > -1) {
-                this.obstacles.splice(index, 1);
+    catmullRomSpline(points, segmentsPer=6) {
+        if (!points || points.length < 3) return points || [];
+        const pts = points.map(p=>({x:p.x,y:p.y}));
+        if (pts.length === 3) pts.splice(0,0,pts[0]); // duplicate first if minimal
+        const out=[];
+        for (let i=0;i<pts.length-3;i++){
+            const p0=pts[i], p1=pts[i+1], p2=pts[i+2], p3=pts[i+3];
+            for (let j=0;j<=segmentsPer;j++){
+                const t=j/segmentsPer; const t2=t*t; const t3=t2*t;
+                const x=0.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3);
+                const y=0.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3);
+                if (!out.length || Math.hypot(x-out[out.length-1].x,y-out[out.length-1].y) > 2) out.push({x,y});
             }
         }
-
-        this.updateAnalytics();
-        this.render();
-        this.showInfoMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully.`, 'success');
-        this.closeDeleteModal();
+        // ensure last point
+        const last=pts[pts.length-2]; if (!out.length || out[out.length-1].x!==last.x || out[out.length-1].y!==last.y) out.push({x:last.x,y:last.y});
+        return out;
     }
-
-    closeDeleteModal() {
-        const modal = document.getElementById('deleteModal');
-        if (modal) {
-            modal.classList.add('hidden');
-        }
-        this.itemToDelete = null;
-        this.hoveredDeleteItem = null;
-        this.deleteHighlight = null;
-        this.hideDeleteTooltip();
-    }
-
-    openHelpModal() {
-        const modal = document.getElementById('helpModal');
-        if (modal) {
-            modal.classList.remove('hidden');
-            // Store the previously focused element
-            this._lastFocusedBeforeHelp = document.activeElement;
-            // Focus the close button for keyboard accessibility
-            const closeBtn = modal.querySelector('#closeHelpModal');
-            if (closeBtn) closeBtn.focus();
-        }
-    }
-
-    closeHelpModal() {
-        const modal = document.getElementById('helpModal');
-        if (modal) {
-            modal.classList.add('hidden');
-            // Restore focus to the previously focused element
-            if (this._lastFocusedBeforeHelp && this._lastFocusedBeforeHelp.focus) {
-                this._lastFocusedBeforeHelp.focus();
-            }
-            this._lastFocusedBeforeHelp = null;
-        }
-    }
+    // ...existing code...
 }
-
-// Global app instance for modal callbacks
-let app;
-
-document.addEventListener('DOMContentLoaded', () => {
-    app = new SpaghettiDiagramApp();
-    // Expose globally so inline handlers in generated modals can call methods
-    try { window.app = app; } catch (_) {}
-    // Re-check palette on window focus (covers hot reloads or dynamic content issues)
-    window.addEventListener('focus', () => { if (window.app) window.app.ensureObjectPalette(); });
-});
+// ...existing code...
