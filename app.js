@@ -412,9 +412,17 @@ class SpaghettiDiagramApp {
                 this.closeObjectModal();
                 this.closeDeleteModal();
                 this.closeCalibrateModal();
-            } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedObject && !isTyping) {
-                e.preventDefault();
-                this.showDeleteConfirmation(this.selectedObject, 'object');
+            } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
+                // Support deleting whichever entity is currently selected
+                let selType = null; let selItem = null;
+                if (this.selectedObject) { selType = 'object'; selItem = this.selectedObject; }
+                else if (this.selectedZone) { selType = 'zone'; selItem = this.selectedZone; }
+                else if (this.selectedObstacle) { selType = 'obstacle'; selItem = this.selectedObstacle; }
+                else if (this.selectedPath) { selType = 'path'; selItem = this.selectedPath; }
+                if (selItem) {
+                    e.preventDefault();
+                    this.showDeleteConfirmation(selItem, selType);
+                }
             }
         });
     }
@@ -910,6 +918,17 @@ class SpaghettiDiagramApp {
             if (clickedHandle) { this.isResizing = true; this.resizeHandle = clickedHandle; return; }
             this.isDragging = true; this.dragStart = { ...this.mousePos }; this.render(); return;
         }
+        // Path body selection (click near any segment)
+        const clickedPath = this.getPathAt(this.mousePos);
+        if (clickedPath) {
+            this.selectedPath = clickedPath;
+            this.selectedObject = null;
+            this.selectedZone = null;
+            this.selectedObstacle = null;
+            this.selectedEndpoint = null;
+            this.render();
+            return;
+        }
         // If nothing clicked clear selections
         this.selectedObject = null; this.selectedZone = null; this.selectedObstacle = null; this.selectedPath = null; this.selectedEndpoint = null; this.render();
     }
@@ -1054,14 +1073,21 @@ class SpaghettiDiagramApp {
             }
             this.dragStart = { ...this.mousePos }; this.render(); return;
         } else {
-            const hovered = this.getObjectAt(this.mousePos) || this.getZoneAt(this.mousePos) || this.getObstacleAt(this.mousePos) || this.selectedObject || this.selectedZone || this.selectedObstacle;
-            const handle = hovered ? this.getResizeHandle(this.mousePos, hovered) : null;
+            const hoveredRect = this.getObjectAt(this.mousePos) || this.getZoneAt(this.mousePos) || this.getObstacleAt(this.mousePos) || this.selectedObject || this.selectedZone || this.selectedObstacle;
+            const handle = hoveredRect ? this.getResizeHandle(this.mousePos, hoveredRect) : null;
+            const overEndpoint = this.getPathEndpointAt(this.mousePos);
+            const overPath = !hoveredRect && !overEndpoint ? this.getPathAt(this.mousePos) : null;
             if (handle) {
                 const cursorMap = { 'nw':'nwse-resize','se':'nwse-resize','ne':'nesw-resize','sw':'nesw-resize','n':'ns-resize','s':'ns-resize','w':'ew-resize','e':'ew-resize'};
                 this.canvas.style.cursor = cursorMap[handle] || 'default';
-            } else if (hovered) { this.canvas.style.cursor = 'move'; }
-            else if (this.getPathEndpointAt(this.mousePos)) { this.canvas.style.cursor = 'pointer'; }
-            else { this.canvas.style.cursor = 'default'; }
+            } else if (hoveredRect) {
+                this.canvas.style.cursor = 'move';
+            } else if (overEndpoint || overPath) {
+                // Pointer (hand) over path endpoints or segments to indicate selection is possible
+                this.canvas.style.cursor = 'pointer';
+            } else {
+                this.canvas.style.cursor = 'default';
+            }
         }
     }
 
@@ -1734,6 +1760,16 @@ class SpaghettiDiagramApp {
         for (const ob of this.obstacles) this.drawObstacle(ctx, ob);
         // Paths
         for (const p of this.paths) this.drawPath(ctx, p);
+        // If a full path is selected, add a highlight overlay
+        if (this.selectedPath && this.selectedPath.points && this.selectedPath.points.length > 1) {
+            ctx.save();
+            ctx.lineWidth = 5;
+            ctx.strokeStyle = 'rgba(30,136,229,0.35)';
+            ctx.beginPath();
+            this.selectedPath.points.forEach((pt,i)=>{ if (!i) ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y); });
+            ctx.stroke();
+            ctx.restore();
+        }
         // Current drawing path
         if (this.isDrawing && this.currentTool === 'path' && this.currentPath.length) {
             ctx.save();
@@ -2108,11 +2144,65 @@ class SpaghettiDiagramApp {
     resetBackgroundTransform(){ this.backgroundTransform={rotation:0,flipH:false,flipV:false}; this.render(); }
 
     // ---- Deletion ----
-    showDeleteConfirmation(item, type){ const modal=document.getElementById('deleteModal'); const msg=document.getElementById('deleteMessage'); if (msg) msg.textContent=`Delete this ${type}?`; this._pendingDelete={item,type}; if (modal) modal.classList.remove('hidden'); }
+    showDeleteConfirmation(item, type){
+        const modal = document.getElementById('deleteModal');
+        const msg = document.getElementById('deleteMessage');
+        const warn = document.getElementById('deleteWarning');
+        if (warn) { warn.classList.add('hidden'); warn.textContent = ''; }
+        if (msg) {
+            if (type === 'clearAll') {
+                msg.textContent = 'Clear all objects, paths, zones, and obstacles?';
+                if (warn) { warn.textContent = 'This cannot be undone.'; warn.classList.remove('hidden'); }
+            } else {
+                msg.textContent = `Delete this ${type}?`;
+            }
+        }
+        this._pendingDelete = { item, type };
+        if (modal) modal.classList.remove('hidden');
+    }
     closeDeleteModal(){ const modal=document.getElementById('deleteModal'); if (modal) modal.classList.add('hidden'); this._pendingDelete=null; }
-    confirmDelete(){ if (!this._pendingDelete) return; const {item,type}=this._pendingDelete; if (type==='object') this.objects=this.objects.filter(o=>o!==item); else if (type==='path') this.paths=this.paths.filter(p=>p!==item); else if (type==='obstacle') this.obstacles=this.obstacles.filter(o=>o!==item); else if (type==='zone') this.zones=this.zones.filter(z=>z!==item); this.selectedObject=null; this.selectedZone=null; this.selectedObstacle=null; this.selectedPath=null; this.updateAnalytics(); this.render(); this.closeDeleteModal(); }    hideDeleteTooltip(){ if (this.deleteTooltip){ try{ this.deleteTooltip.remove(); }catch(_){} this.deleteTooltip=null; } }
+    confirmDelete(){
+        if (!this._pendingDelete) return;
+        const { item, type } = this._pendingDelete;
+        if (type === 'object') this.objects = this.objects.filter(o => o !== item);
+        else if (type === 'path') this.paths = this.paths.filter(p => p !== item);
+        else if (type === 'obstacle') this.obstacles = this.obstacles.filter(o => o !== item);
+        else if (type === 'zone') this.zones = this.zones.filter(z => z !== item);
+        else if (type === 'clearAll') {
+            // Perform the same clearing as clearAll but via modal flow
+            this.objects = [];
+            this.paths = [];
+            this.obstacles = [];
+            this.zones = [];
+        }
+        // Clear selections and state
+        this.selectedObject = null;
+        this.selectedZone = null;
+        this.selectedObstacle = null;
+        this.selectedPath = null;
+        this.selectedEndpoint = null;
+        this.isDrawing = false;
+        this.isDragging = false;
+        this.isResizing = false;
+        this.isDraggingEndpoint = false;
+        this.currentPath = [];
+        this.currentObstacle = null;
+        this.currentZone = null;
+        this.editingPath = null;
+        this.hoveredDeleteItem = null;
+        this.deleteHighlight = null;
+        this.hideDeleteTooltip();
+        this.updateAnalytics();
+        this.render();
+        this.closeDeleteModal();
+        if (type === 'clearAll') this.showInfoMessage('Workspace cleared.', 'success');
+    }
+    hideDeleteTooltip(){ if (this.deleteTooltip){ try{ this.deleteTooltip.remove(); }catch(_){} this.deleteTooltip=null; } }
 
-    clearAll(){ if(!confirm('Clear all objects, paths, zones, and obstacles?')) return; this.objects=[]; this.paths=[]; this.obstacles=[]; this.zones=[]; this.selectedObject=null; this.selectedZone=null; this.selectedObstacle=null; this.selectedPath=null; this.updateAnalytics(); this.render(); }
+    clearAll(){
+        // Use in-app confirmation modal for reliability in embedded browsers
+        this.showDeleteConfirmation(null, 'clearAll');
+    }
 
     exportData(){ const data={ version:1, objects:this.objects, paths:this.paths, obstacles:this.obstacles, zones:this.zones, scale:{ units:this.units, unitsPerPixel:this.unitsPerPixel, stepsPerUnit:this.stepsPerUnit, gridCellUnits:this.gridCellUnits }, backgroundTransform:this.backgroundTransform }; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='spaghetti_diagram.json'; a.click(); URL.revokeObjectURL(a.href); }
 
