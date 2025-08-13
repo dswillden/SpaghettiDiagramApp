@@ -1081,7 +1081,13 @@ class SpaghettiDiagramApp {
         this.isResizing = false;
         this.isDraggingEndpoint = false;
         this.resizeHandle = null;
-        this.canvas.style.cursor = 'default'; // Reset cursor on mouse up
+        // Only force a default cursor for tools that rely on dynamic inline cursors; 
+        // for path mode we clear inline style so the CSS marker cursor shows.
+        if (this.currentTool === 'path') {
+            this.canvas.style.cursor = '';
+        } else {
+            this.canvas.style.cursor = 'default';
+        }
     }
     
     handleDoubleClick(e) {
@@ -1195,6 +1201,10 @@ class SpaghettiDiagramApp {
         document.getElementById('pathModal').classList.add('hidden');
         document.getElementById('pathForm').reset();
         this.tempPathPoints = null;
+        // Restore marker cursor if still in path tool
+        if (this.currentTool === 'path') {
+            this.canvas.style.cursor = '';
+        }
     }
     
     savePathMetadata(e) {
