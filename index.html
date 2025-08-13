@@ -191,7 +191,7 @@
         </div>
 
         <!-- Path Metadata Modal -->
-        <div class="modal hidden" id="pathModal" role="dialog" aria-modal="true" aria-labelledby="pathModalTitle">
+        <div class="modal hidden side-panel" id="pathModal" role="dialog" aria-modal="true" aria-labelledby="pathModalTitle">
             <div class="modal-content">
                 <div class="modal-header">
                     <h3 id="pathModalTitle">Path Details</h3>
@@ -200,14 +200,14 @@
                 <div class="modal-body">
                     <form id="pathForm">
                         <div class="form-group">
-                            <label class="form-label" for="pathDescription">Description</label>
+                            <label class="form-label" for="pathDescription">Name</label>
                             <input type="text" id="pathDescription" class="form-control" 
-                                   placeholder="e.g., Walk from Desk to Machine A" required>
+                                   placeholder="Auto name" required>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="pathFrequency">Daily Frequency</label>
                             <input type="number" id="pathFrequency" class="form-control" 
-                                   placeholder="Number of times per day" min="1" required>
+                                   placeholder="Number per day" min="1" required>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="pathColor">Path Color</label>
@@ -222,9 +222,12 @@
                         </div>
                     </form>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn--secondary" id="cancelPath">Cancel</button>
-                    <button type="submit" form="pathForm" class="btn btn--primary" id="savePath">Save Path</button>
+                <div class="modal-footer" style="justify-content: space-between;">
+                    <small class="text-muted" style="flex:1">Defaults auto‑filled. Adjust if needed then Save.</small>
+                    <div style="display:flex; gap:8px;">
+                        <button type="button" class="btn btn--secondary" id="cancelPath">Cancel</button>
+                        <button type="submit" form="pathForm" class="btn btn--primary" id="savePath">Save</button>
+                    </div>
                 </div>
             </div>
         </div>

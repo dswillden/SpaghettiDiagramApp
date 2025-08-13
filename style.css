@@ -1170,6 +1170,11 @@ select.form-control {
   border-top: 1px solid var(--color-border);
 }
 
+/* Side Panel Modal Styles */
+.modal.side-panel { align-items: stretch; justify-content: flex-end; background: transparent; }
+.modal.side-panel .modal-content { height: 100%; max-width: 340px; width: 340px; border-radius: 0; border-left: 1px solid var(--color-border); box-shadow: -4px 0 12px rgba(0,0,0,0.15); }
+.modal.side-panel.hidden { display: none; }
+
 /* Loading Overlay */
 .loading-overlay {
   position: fixed;

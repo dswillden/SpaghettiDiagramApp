@@ -23,6 +23,8 @@ class SpaghettiDiagramApp {
         this.currentObstacle = null;
         this.currentZone = null;
         this.tempPathPoints = null;
+        // Auto path naming counter
+        this.pathAutoCounter = 1;
         
         // Flag to ensure we only apply the deferred initial reset once
         // this._initialViewApplied = false; // Removed _initialViewApplied flag (no longer needed)
@@ -1178,9 +1180,14 @@ class SpaghettiDiagramApp {
         const modal = document.getElementById('pathModal');
         modal.classList.remove('hidden');
         const desc = document.getElementById('pathDescription');
-        desc.focus();
-        // Ensure form fields are blank each time except color default
-        // (form.reset may already have happened on prior close)
+        const freq = document.getElementById('pathFrequency');
+        // Pre-fill default values if empty / new
+        if (desc) {
+            const defaultName = `Path ${this.pathAutoCounter}`;
+            if (!desc.value) desc.value = defaultName;
+        }
+        if (freq && !freq.value) freq.value = 1;
+        if (desc) desc.focus();
     }
     
     closePathModal() {
@@ -1239,6 +1246,8 @@ class SpaghettiDiagramApp {
         };
         console.log('[PATH][savePathMetadata] Adding path object:', path);
         this.paths.push(path);
+        // Increment auto counter for subsequent default naming
+        this.pathAutoCounter += 1;
         console.log('[PATH][savePathMetadata] Paths total now:', this.paths.length);
         this.updateObjectVisits(path);
         this.updateAnalytics();
@@ -1598,15 +1607,30 @@ class SpaghettiDiagramApp {
 
     drawGrid(ctx){
         const cellPx = (this.unitsPerPixel>0) ? (this.gridCellUnits/this.unitsPerPixel) : 50;
-        if (!cellPx || cellPx<4) return;
-        const w = this.canvas.width/(this.zoom||1); const h = this.canvas.height/(this.zoom||1);
-        const startX = -this.pan.x/(this.zoom||1); const startY = -this.pan.y/(this.zoom||1);
-        const offsetX = (Math.floor(startX / cellPx) * cellPx) - startX;
-        const offsetY = (Math.floor(startY / cellPx) * cellPx) - startY;
-        ctx.save(); ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1; ctx.beginPath();
-        for (let x=offsetX; x<=w; x+=cellPx){ ctx.moveTo(x,0); ctx.lineTo(x,h); }
-        for (let y=offsetY; y<=h; y+=cellPx){ ctx.moveTo(0,y); ctx.lineTo(w,y); }
-        ctx.stroke(); ctx.restore();
+        if (!cellPx || cellPx < 4) return;
+        const zoom = this.zoom || 1;
+        // Visible world-space rectangle based on current pan/zoom
+        const viewLeft = -this.pan.x / zoom;
+        const viewTop = -this.pan.y / zoom;
+        const viewRight = viewLeft + this.canvas.width / zoom;
+        const viewBottom = viewTop + this.canvas.height / zoom;
+        // Start lines just before the visible area so they fully cover
+        const firstX = Math.floor(viewLeft / cellPx) * cellPx;
+        const firstY = Math.floor(viewTop / cellPx) * cellPx;
+        ctx.save();
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = firstX; x <= viewRight; x += cellPx) {
+            ctx.moveTo(x, viewTop);
+            ctx.lineTo(x, viewBottom);
+        }
+        for (let y = firstY; y <= viewBottom; y += cellPx) {
+            ctx.moveTo(viewLeft, y);
+            ctx.lineTo(viewRight, y);
+        }
+        ctx.stroke();
+        ctx.restore();
     }    drawObject(ctx,o){
         console.log('[DEBUG] drawObject called for:', o.name, 'at position:', o.x, o.y);
         ctx.save();
@@ -1701,8 +1725,32 @@ class SpaghettiDiagramApp {
     closeDeleteModal(){ const modal=document.getElementById('deleteModal'); if (modal) modal.classList.add('hidden'); this._pendingDelete=null; }
     confirmDelete(){ if (!this._pendingDelete) return; const {item,type}=this._pendingDelete; if (type==='object') this.objects=this.objects.filter(o=>o!==item); else if (type==='path') this.paths=this.paths.filter(p=>p!==item); else if (type==='obstacle') this.obstacles=this.obstacles.filter(o=>o!==item); else if (type==='zone') this.zones=this.zones.filter(z=>z!==item); this.selectedObject=null; this.selectedZone=null; this.selectedObstacle=null; this.selectedPath=null; this.updateAnalytics(); this.render(); this.closeDeleteModal(); }    hideDeleteTooltip(){ if (this.deleteTooltip){ try{ this.deleteTooltip.remove(); }catch(_){} this.deleteTooltip=null; } }
 
-    clearAll(){ if(!confirm('Clear all objects, paths, zones, and obstacles?')) return; this.objects=[]; this.paths=[]; this.obstacles=[]; this.zones=[]; this.selectedObject=null; this.selectedZone=null; this.selectedObstacle=null; this.selectedPath=null; this.updateAnalytics(); this.render(); }
-
+    clearAll(){
+        // Enhanced: fully reset workspace and UI
+        if(!confirm('Clear all objects, paths, zones, and obstacles?')) return;
+        this.objects = [];
+        this.paths = [];
+        this.obstacles = [];
+        this.zones = [];
+        this.selectedObject = null;
+        this.selectedZone = null;
+        this.selectedObstacle = null;
+        this.selectedPath = null;
+        this.currentPath = [];
+        this.currentObstacle = null;
+        this.currentZone = null;
+        this.isDrawing = false;
+        // Reset analytics & UI lists
+        this.updateAnalytics();
+        if (typeof this.refreshAutoPathSelects === 'function') this.refreshAutoPathSelects();
+        const hotspotList = document.getElementById('hotspotList');
+        if (hotspotList) hotspotList.innerHTML = '<div class="empty-state">No paths drawn yet</div>';
+        const zoneList = document.getElementById('zoneList');
+        if (zoneList) zoneList.innerHTML = '<div class="empty-state">No zones yet</div>';
+        this.render();
+        this.showInfoMessage('Workspace cleared','info');
+    }
+    
     exportData(){ const data={ version:1, objects:this.objects, paths:this.paths, obstacles:this.obstacles, zones:this.zones, scale:{ units:this.units, unitsPerPixel:this.unitsPerPixel, stepsPerUnit:this.stepsPerUnit, gridCellUnits:this.gridCellUnits }, backgroundTransform:this.backgroundTransform }; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='spaghetti_diagram.json'; a.click(); URL.revokeObjectURL(a.href); }
 
     // ----------------------------------------------------------------------
@@ -1720,21 +1768,8 @@ class SpaghettiDiagramApp {
                 console.log('[Bootstrap] Canvas context:', window.app.ctx);
                   // Test object creation after a short delay
                 setTimeout(() => {
-                    console.log('[Bootstrap] Testing object creation...');
-                    console.log('[Bootstrap] Object templates:', window.app.objectTemplates);
-                    console.log('[Bootstrap] Current objects count:', window.app.objects.length);
-                    
-                    // Test adding an object programmatically
-                    window.app.addObject('Desk', 100, 100);
-                    console.log('[Bootstrap] After adding test object, count:', window.app.objects.length);
-                    
-                    // Also test palette population
-                    const palette = document.getElementById('objectPalette');
-                    console.log('[Bootstrap] Palette children count:', palette?.children.length);
-                    if (palette && palette.children.length <= 1) {
-                        console.log('[Bootstrap] Re-populating object palette...');
-                        window.app.populateObjectPalette();
-                    }
+                    console.log('[Bootstrap] Test block skipped (auto object creation removed).');
+                    // Previously auto-added a Desk object here. Removed per user request to start with empty canvas.
                 }, 1000);
             } catch (e) { 
                 console.error('[Bootstrap] Failed to init app:', e); 
