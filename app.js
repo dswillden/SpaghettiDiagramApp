@@ -25,6 +25,8 @@ class SpaghettiDiagramApp {
         this.tempPathPoints = null;
         // Auto path naming counter
         this.pathAutoCounter = 1;
+        // Fallback store for last simplified path in case tempPathPoints gets cleared unexpectedly
+        this.lastSimplifiedPathPoints = null;
         
         // Flag to ensure we only apply the deferred initial reset once
         // this._initialViewApplied = false; // Removed _initialViewApplied flag (no longer needed)
@@ -1103,6 +1105,7 @@ class SpaghettiDiagramApp {
         const beforeSimplify = this.currentPath.length;
         // Simplify path to reduce point count
         const simplified = this.simplifyPath(this.currentPath);
+        this.lastSimplifiedPathPoints = simplified ? [...simplified] : null; // store fallback
         console.log('[PATH][finalizePath] Simplified from', beforeSimplify, 'to', simplified.length, 'points');
         if (simplified.length >= 2) {
             this.tempPathPoints = simplified;
@@ -1194,27 +1197,32 @@ class SpaghettiDiagramApp {
         console.log('[PATH][closePathModal] Closing path modal. Clearing tempPathPoints.');
         document.getElementById('pathModal').classList.add('hidden');
         document.getElementById('pathForm').reset();
-        this.tempPathPoints = null;
+        this.tempPathPoints = null; // keep lastSimplifiedPathPoints for fallback until next draw or cancel
     }
     
     savePathMetadata(e) {
         console.log('[PATH][savePathMetadata] Submit handler entered.');
         e.preventDefault();
+        // Fallback: if tempPathPoints lost (edge case on subsequent modal opens) use stored lastSimplifiedPathPoints
+        if ((!this.tempPathPoints || this.tempPathPoints.length < 2) && this.lastSimplifiedPathPoints && this.lastSimplifiedPathPoints.length >= 2) {
+            console.warn('[PATH][savePathMetadata] tempPathPoints missing. Using lastSimplifiedPathPoints fallback.');
+            this.tempPathPoints = [...this.lastSimplifiedPathPoints];
+        }
         if (!this.tempPathPoints || this.tempPathPoints.length < 2) {
             console.error('[PATH][savePathMetadata] Invalid tempPathPoints. Value:', this.tempPathPoints);
-            alert('Invalid path data. (Debug: No points)');
+            this.showInfoMessage('Could not save path (no points). Draw again.', 'error');
             return;
         }
         const descriptionEl = document.getElementById('pathDescription');
         const frequencyEl = document.getElementById('pathFrequency');
         const colorEl = document.getElementById('pathColor');
-        const description = descriptionEl.value.trim();
-        const frequency = parseInt(frequencyEl.value);
+        const description = descriptionEl.value.trim() || `Path ${this.pathAutoCounter}`;
+        const frequency = parseInt(frequencyEl.value) || 1;
         const color = colorEl.value;
         console.log('[PATH][savePathMetadata] Collected form data:', { description, frequency, color, points: this.tempPathPoints.length });
-        if (!description || frequency < 1 || Number.isNaN(frequency)) {
-            console.warn('[PATH][savePathMetadata] Validation failed.', { description, frequency });
-            alert('Please fill in all required fields.');
+        if (frequency < 1) {
+            console.warn('[PATH][savePathMetadata] Validation failed (frequency).', { description, frequency });
+            this.showInfoMessage('Frequency must be at least 1', 'warning');
             return;
         }
         // Determine attachments (snap endpoints to nearest object center if within threshold)
@@ -1253,15 +1261,17 @@ class SpaghettiDiagramApp {
         this.updateAnalytics();
         this.closePathModal();
         this.render();
+        // Clear fallback after successful save
+        this.lastSimplifiedPathPoints = null;
+        this.tempPathPoints = null;
         // Show success feedback
         const info = document.getElementById('canvasInfo');
-        const originalText = info.textContent;
-        info.textContent = `Path "${description}" added successfully!`;
-        info.style.color = 'var(--color-success)';
-        setTimeout(() => {
-            info.textContent = originalText;
-            info.style.color = '';
-        }, 2000);
+        if (info) {
+            const originalText = info.textContent;
+            info.textContent = `Path "${description}" added.`;
+            info.style.color = 'var(--color-success)';
+            setTimeout(() => { info.textContent = originalText; info.style.color = ''; }, 1800);
+        }
     }
     
     openZoneModal() {
