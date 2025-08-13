@@ -195,14 +195,20 @@ class SpaghettiDiagramApp {
         const unitsSelect = document.getElementById('unitsSelect');
         const stepsPerUnitInput = document.getElementById('stepsPerUnit');
         const gridCellUnitsInput = document.getElementById('gridCellUnits');
-        const calibrateBtn = document.getElementById('calibrateScale');
-        const resetScaleBtn = document.getElementById('resetScale');
+    const calibrateBtn = document.getElementById('calibrateScale');
+    const resetScaleBtn = document.getElementById('resetScale');
+    const toggleCalLineBtn = document.getElementById('toggleCalibrationLine');
         const persist = () => this.saveScaleToStorage();
         if (unitsSelect) unitsSelect.addEventListener('change', (e) => { this.units = e.target.value; this.updateScaleUI(); this.updateAnalytics(); this.render(); persist(); });
         if (stepsPerUnitInput) stepsPerUnitInput.addEventListener('change', (e) => { this.stepsPerUnit = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); persist(); });
         if (gridCellUnitsInput) gridCellUnitsInput.addEventListener('change', (e) => { this.gridCellUnits = Math.max(0.01, parseFloat(e.target.value) || 1); this.render(); persist(); });
         if (calibrateBtn) calibrateBtn.addEventListener('click', () => this.beginCalibration());
         if (resetScaleBtn) resetScaleBtn.addEventListener('click', () => { this.resetScale(); persist(); });
+        if (toggleCalLineBtn) toggleCalLineBtn.addEventListener('click', () => {
+            this.showCalibrationLine = !this.showCalibrationLine;
+            toggleCalLineBtn.textContent = this.showCalibrationLine ? 'Hide Cal Line' : 'Show Cal Line';
+            this.render();
+        });
         
         // File upload (image or PDF)
         document.getElementById('backgroundUpload').addEventListener('change', this.handleBackgroundUpload.bind(this));
@@ -1541,8 +1547,8 @@ class SpaghettiDiagramApp {
         // Grid
         this.drawGrid(ctx);
 
-        // Calibration provisional / finalized measurement line
-        if ((this.isCalibrating && this.calibrationPoints.length > 0) || (this.calibrationPoints.length === 2 && this._pendingCalibrationPx)) {
+    // Calibration provisional / finalized measurement line
+    if (this.showCalibrationLine && ((this.isCalibrating && this.calibrationPoints.length > 0) || (this.calibrationPoints.length === 2 && (this._pendingCalibrationPx || this._lastCalibrationReal)))) {
             const pts = this.calibrationPoints;
             const a = pts[0];
             // While actively calibrating and only one point chosen, extend line to current mouse position
@@ -1560,13 +1566,18 @@ class SpaghettiDiagramApp {
                 const r = 5 / (this.zoom || 1);
                 ctx.beginPath(); ctx.arc(a.x, a.y, r, 0, Math.PI*2); ctx.fill();
                 ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI*2); ctx.fill();
-                // Length label (pixels)
+                // Length label (pixels + real units if available)
                 const dx = b.x - a.x; const dy = b.y - a.y; const dist = Math.hypot(dx, dy);
                 const midX = a.x + dx/2; const midY = a.y + dy/2;
                 ctx.save();
                 ctx.translate(midX, midY);
                 // Background box for readability
-                const label = `${dist.toFixed(1)} px`;
+                let label = `${dist.toFixed(1)} px`;
+                if (this.unitsPerPixel>0){
+                    const real = dist * this.unitsPerPixel; label += ` / ${real.toFixed(2)} ${this.units}`;
+                } else if (this._lastCalibrationReal && this._pendingCalibrationPx){
+                    const ratio = this._lastCalibrationReal / this._pendingCalibrationPx; const real = dist * ratio; label += ` / ${real.toFixed(2)} ${this._lastCalibrationUnits||this.units}`;
+                }
                 ctx.font = `${12 / (this.zoom || 1)}px sans-serif`;
                 const metrics = ctx.measureText(label);
                 const pad = 4 / (this.zoom || 1);
@@ -1742,10 +1753,24 @@ class SpaghettiDiagramApp {
     saveScaleToStorage(){ try{ localStorage.setItem('sdScale', JSON.stringify({ units:this.units, unitsPerPixel:this.unitsPerPixel, stepsPerUnit:this.stepsPerUnit, gridCellUnits:this.gridCellUnits })); }catch(_){} }
     updateScaleUI(){ const info=document.getElementById('gridScaleInfo'); if (info){ if (this.unitsPerPixel>0) info.textContent = `1 pixel = ${(this.unitsPerPixel).toFixed(4)} ${this.units}`; else info.textContent='Scale not set'; } const u=document.getElementById('calibrateUnits'); if (u) u.textContent=this.units; }
 
-    beginCalibration(){ this.isCalibrating=true; this.calibrationPoints=[]; this.showInfoMessage('Click two points on background to measure distance.','info'); }
+    beginCalibration(){
+        this.isCalibrating=true; this.calibrationPoints=[]; this._pendingCalibrationPx=null; this.showCalibrationLine = true;
+        const toggleBtn=document.getElementById('toggleCalibrationLine');
+        if (toggleBtn){ toggleBtn.style.display='inline-block'; toggleBtn.textContent='Hide Cal Line'; }
+        this.showInfoMessage('Click two points on background to measure distance.','info');
+        this.render();
+    }
     handleCalibrationClick(){ if (!this.isCalibrating) return; this.calibrationPoints.push({...this.mousePos}); if (this.calibrationPoints.length===2){ const [a,b]=this.calibrationPoints; const px=Math.hypot(b.x-a.x,b.y-a.y); this._pendingCalibrationPx = px; this.openCalibrateModal(px); this.isCalibrating=false; } this.render(); }
     openCalibrateModal(px){ const m=document.getElementById('calibrateModal'); if (m) m.classList.remove('hidden'); const info=document.getElementById('calibrateInfo'); if (info) info.textContent=`Measured pixel distance: ${px.toFixed(2)} px`; const input=document.getElementById('calibrateDistance'); if (input){ input.value=''; input.focus(); } }
-    applyCalibrationFromModal(){ const input=document.getElementById('calibrateDistance'); if (!input) return; const real=parseFloat(input.value); if (!real||real<=0||!this._pendingCalibrationPx) { this.showInfoMessage('Enter a valid distance.','warning'); return; } this.unitsPerPixel = real/this._pendingCalibrationPx; this.saveScaleToStorage(); this.updateScaleUI(); this.updateAnalytics(); this.closeCalibrateModal(); this.showInfoMessage('Scale applied.','success'); }
+    applyCalibrationFromModal(){
+        const input=document.getElementById('calibrateDistance'); if (!input) return; const real=parseFloat(input.value);
+        if (!real||real<=0||!this._pendingCalibrationPx){ this.showInfoMessage('Enter a valid distance.','warning'); return; }
+        this.unitsPerPixel = real/this._pendingCalibrationPx;
+        this._lastCalibrationReal = real; this._lastCalibrationUnits = this.units;
+        this.saveScaleToStorage(); this.updateScaleUI(); this.updateAnalytics(); this.closeCalibrateModal();
+        this.showInfoMessage(`Scale applied: ${real} ${this.units} ↔ ${this._pendingCalibrationPx.toFixed(1)} px`,'success');
+        this.render();
+    }
     closeCalibrateModal(){ const m=document.getElementById('calibrateModal'); if (m) m.classList.add('hidden'); }
     resetScale(){ this.unitsPerPixel=0; this.stepsPerUnit=0; this.gridCellUnits=1; this.saveScaleToStorage(); this.updateScaleUI(); this.updateAnalytics(); this.render(); }
 
