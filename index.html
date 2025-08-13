@@ -93,7 +93,12 @@
                     <div class="btn-group">
                         <button id="calibrateScale" class="btn btn--secondary" title="Click two points to calibrate">Calibrate by Click</button>
                         <button id="resetScale" class="btn btn--outline">Reset Scale</button>
-                        <button id="toggleCalibrationLine" class="btn btn--outline" title="Show or hide the last calibration reference line" style="display:none">Hide Cal Line</button>
+                    </div>
+                    <div class="form-group" style="margin-top:6px; display:none" id="calLineToggleWrapper">
+                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; user-select:none">
+                            <input type="checkbox" id="toggleCalibrationLine" checked style="margin:0" />
+                            <span>Show Calibration Line</span>
+                        </label>
                     </div>
                     <div class="small text-muted" id="gridScaleInfo" style="margin-top:8px;"></div>
                 </div>

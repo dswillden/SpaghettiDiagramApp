@@ -197,16 +197,15 @@ class SpaghettiDiagramApp {
         const gridCellUnitsInput = document.getElementById('gridCellUnits');
     const calibrateBtn = document.getElementById('calibrateScale');
     const resetScaleBtn = document.getElementById('resetScale');
-    const toggleCalLineBtn = document.getElementById('toggleCalibrationLine');
+    const toggleCalLineChk = document.getElementById('toggleCalibrationLine');
         const persist = () => this.saveScaleToStorage();
         if (unitsSelect) unitsSelect.addEventListener('change', (e) => { this.units = e.target.value; this.updateScaleUI(); this.updateAnalytics(); this.render(); persist(); });
         if (stepsPerUnitInput) stepsPerUnitInput.addEventListener('change', (e) => { this.stepsPerUnit = Math.max(0, parseFloat(e.target.value) || 0); this.updateScaleUI(); this.updateAnalytics(); persist(); });
         if (gridCellUnitsInput) gridCellUnitsInput.addEventListener('change', (e) => { this.gridCellUnits = Math.max(0.01, parseFloat(e.target.value) || 1); this.render(); persist(); });
         if (calibrateBtn) calibrateBtn.addEventListener('click', () => this.beginCalibration());
         if (resetScaleBtn) resetScaleBtn.addEventListener('click', () => { this.resetScale(); persist(); });
-        if (toggleCalLineBtn) toggleCalLineBtn.addEventListener('click', () => {
-            this.showCalibrationLine = !this.showCalibrationLine;
-            toggleCalLineBtn.textContent = this.showCalibrationLine ? 'Hide Cal Line' : 'Show Cal Line';
+        if (toggleCalLineChk) toggleCalLineChk.addEventListener('change', () => {
+            this.showCalibrationLine = !!toggleCalLineChk.checked;
             this.render();
         });
         
@@ -1755,8 +1754,10 @@ class SpaghettiDiagramApp {
 
     beginCalibration(){
         this.isCalibrating=true; this.calibrationPoints=[]; this._pendingCalibrationPx=null; this.showCalibrationLine = true;
-        const toggleBtn=document.getElementById('toggleCalibrationLine');
-        if (toggleBtn){ toggleBtn.style.display='inline-block'; toggleBtn.textContent='Hide Cal Line'; }
+        const chk=document.getElementById('toggleCalibrationLine');
+        const wrapper=document.getElementById('calLineToggleWrapper');
+        if (chk){ chk.checked=true; }
+        if (wrapper){ wrapper.style.display='block'; }
         this.showInfoMessage('Click two points on background to measure distance.','info');
         this.render();
     }
