@@ -1666,6 +1666,29 @@ class SpaghettiDiagramApp {
             ctx.stroke();
             ctx.restore();
         }
+        // Provisional path (after mouse up, while metadata modal is open)
+        if (!this.isDrawing && this.tempPathPoints && this.tempPathPoints.length > 1) {
+            const pathModal = document.getElementById('pathModal');
+            if (pathModal && !pathModal.classList.contains('hidden')) {
+                ctx.save();
+                ctx.strokeStyle = '#0074D9';
+                ctx.lineWidth = 2; ctx.setLineDash([10,6]);
+                ctx.beginPath();
+                this.tempPathPoints.forEach((pt,i)=>{ if (!i) ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y); });
+                ctx.stroke();
+                // Optional length label mid-path for user feedback
+                const len = this.calculatePathLength(this.tempPathPoints);
+                const mid = this.tempPathPoints[Math.floor(this.tempPathPoints.length/2)];
+                if (mid) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                    ctx.font = '12px sans-serif';
+                    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+                    const labelUnits = (this.unitsPerPixel>0) ? ` / ${(len*this.unitsPerPixel).toFixed(2)} ${this.units}` : '';
+                    ctx.fillText(`${len.toFixed(1)} px${labelUnits}`, mid.x+6, mid.y-6);
+                }
+                ctx.restore();
+            }
+        }
         // Current obstacle draw
         if (this.isDrawing && this.currentTool === 'obstacle' && this.currentObstacle) {
             ctx.save(); ctx.fillStyle='rgba(200,60,0,0.25)'; ctx.strokeStyle='rgba(200,60,0,0.9)'; ctx.lineWidth=1.5; const o=this.currentObstacle; ctx.fillRect(o.x,o.y,o.width,o.height); ctx.strokeRect(o.x,o.y,o.width,o.height); ctx.restore();
