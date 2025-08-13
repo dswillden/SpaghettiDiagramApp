@@ -1191,7 +1191,16 @@ class SpaghettiDiagramApp {
         const modal = document.getElementById('pathModal');
         modal.classList.remove('hidden');
         const desc = document.getElementById('pathDescription');
-        desc.focus();
+        // Pre-fill a default description if empty (helps users quickly save additional paths)
+        if (desc && !desc.value.trim()) {
+            desc.value = `Path ${this.paths.length + 1}`;
+        }
+        // Restore last used frequency or default to 1
+        const freqEl = document.getElementById('pathFrequency');
+        if (freqEl && !freqEl.value) {
+            freqEl.value = this._lastPathFrequency || 1;
+        }
+        if (desc) desc.focus();
         // Ensure form fields are blank each time except color default
         // (form.reset may already have happened on prior close)
     }
@@ -1257,6 +1266,8 @@ class SpaghettiDiagramApp {
         console.log('[PATH][savePathMetadata] Adding path object:', path);
         this.paths.push(path);
         console.log('[PATH][savePathMetadata] Paths total now:', this.paths.length);
+    // Remember last frequency for convenience
+    this._lastPathFrequency = frequency;
         this.updateObjectVisits(path);
         this.updateAnalytics();
         this.closePathModal();
