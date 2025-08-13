@@ -1597,16 +1597,37 @@ class SpaghettiDiagramApp {
     }
 
     drawGrid(ctx){
-        const cellPx = (this.unitsPerPixel>0) ? (this.gridCellUnits/this.unitsPerPixel) : 50;
-        if (!cellPx || cellPx<4) return;
-        const w = this.canvas.width/(this.zoom||1); const h = this.canvas.height/(this.zoom||1);
-        const startX = -this.pan.x/(this.zoom||1); const startY = -this.pan.y/(this.zoom||1);
-        const offsetX = (Math.floor(startX / cellPx) * cellPx) - startX;
-        const offsetY = (Math.floor(startY / cellPx) * cellPx) - startY;
-        ctx.save(); ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1; ctx.beginPath();
-        for (let x=offsetX; x<=w; x+=cellPx){ ctx.moveTo(x,0); ctx.lineTo(x,h); }
-        for (let y=offsetY; y<=h; y+=cellPx){ ctx.moveTo(0,y); ctx.lineTo(w,y); }
-        ctx.stroke(); ctx.restore();
+        // Determine grid cell size in world units. If scale undefined, use fixed 50px world size.
+        const cellWorld = (this.unitsPerPixel>0) ? (this.gridCellUnits/this.unitsPerPixel) : 50;
+        if (!cellWorld || cellWorld < 4) return;
+        const z = (this.zoom||1);
+        // Compute visible world rectangle (inverse of transform)
+        const viewWorldX = -this.pan.x / z;
+        const viewWorldY = -this.pan.y / z;
+        const viewWorldW = this.canvas.width / z;
+        const viewWorldH = this.canvas.height / z;
+        // Expand by one cell to avoid edge clipping during panning
+        const startCol = Math.floor(viewWorldX / cellWorld) - 1;
+        const endCol   = Math.ceil((viewWorldX + viewWorldW) / cellWorld) + 1;
+        const startRow = Math.floor(viewWorldY / cellWorld) - 1;
+        const endRow   = Math.ceil((viewWorldY + viewWorldH) / cellWorld) + 1;
+        ctx.save();
+        // Keep grid lines visually 1px regardless of zoom
+        ctx.lineWidth = 1 / z;
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.beginPath();
+        for (let c = startCol; c <= endCol; c++) {
+            const x = c * cellWorld;
+            ctx.moveTo(x, viewWorldY - cellWorld*2);
+            ctx.lineTo(x, viewWorldY + viewWorldH + cellWorld*2);
+        }
+        for (let r = startRow; r <= endRow; r++) {
+            const y = r * cellWorld;
+            ctx.moveTo(viewWorldX - cellWorld*2, y);
+            ctx.lineTo(viewWorldX + viewWorldW + cellWorld*2, y);
+        }
+        ctx.stroke();
+        ctx.restore();
     }    drawObject(ctx,o){
         console.log('[DEBUG] drawObject called for:', o.name, 'at position:', o.x, o.y);
         ctx.save();
@@ -1718,24 +1739,7 @@ class SpaghettiDiagramApp {
                 console.log('[Bootstrap] App initialized successfully:', window.app);
                 console.log('[Bootstrap] Canvas element:', window.app.canvas);
                 console.log('[Bootstrap] Canvas context:', window.app.ctx);
-                  // Test object creation after a short delay
-                setTimeout(() => {
-                    console.log('[Bootstrap] Testing object creation...');
-                    console.log('[Bootstrap] Object templates:', window.app.objectTemplates);
-                    console.log('[Bootstrap] Current objects count:', window.app.objects.length);
-                    
-                    // Test adding an object programmatically
-                    window.app.addObject('Desk', 100, 100);
-                    console.log('[Bootstrap] After adding test object, count:', window.app.objects.length);
-                    
-                    // Also test palette population
-                    const palette = document.getElementById('objectPalette');
-                    console.log('[Bootstrap] Palette children count:', palette?.children.length);
-                    if (palette && palette.children.length <= 1) {
-                        console.log('[Bootstrap] Re-populating object palette...');
-                        window.app.populateObjectPalette();
-                    }
-                }, 1000);
+                // Removed automatic test object creation to start with a blank canvas per new requirements.
             } catch (e) { 
                 console.error('[Bootstrap] Failed to init app:', e); 
             } 
