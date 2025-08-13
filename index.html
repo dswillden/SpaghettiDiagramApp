@@ -196,6 +196,37 @@
             </main>
         </div>
 
+        <!-- Path Side Panel (inline editor after drawing) -->
+        <div id="pathSidePanel" class="path-side-panel hidden" aria-label="Path Details" aria-live="polite">
+            <div class="path-panel-header">
+                <h3 class="path-panel-title">Path Details</h3>
+                <button id="pathPanelClose" class="panel-close-btn" title="Close">×</button>
+            </div>
+            <form id="pathPanelForm" class="path-panel-body" autocomplete="off">
+                <div class="form-group">
+                    <label class="form-label" for="pathPanelDescription">Description</label>
+                    <input type="text" id="pathPanelDescription" class="form-control" placeholder="Path description" />
+                </div>
+                <div class="form-group" style="display:flex; gap:8px; align-items:flex-end;">
+                    <div style="flex:1 1 50%">
+                        <label class="form-label" for="pathPanelFrequency">Daily Frequency</label>
+                        <input type="number" id="pathPanelFrequency" class="form-control" min="1" />
+                    </div>
+                    <div style="flex:1 1 50%">
+                        <label class="form-label" for="pathPanelColor">Color</label>
+                        <input type="color" id="pathPanelColor" class="form-control" style="padding:4px; height:40px" />
+                    </div>
+                </div>
+                <div class="small text-muted" style="margin-top:4px; line-height:1.3">
+                    Press Enter to save. Draw another path to auto‑save defaults. Double‑click a path (Select tool) to edit again.
+                </div>
+                <div class="path-panel-footer">
+                    <button type="button" class="btn btn--outline" id="pathPanelCloseFooter">Close</button>
+                    <button type="submit" class="btn btn--primary" id="pathPanelSave">Save</button>
+                </div>
+            </form>
+        </div>
+
         <!-- Path Metadata Modal -->
         <div class="modal hidden" id="pathModal" role="dialog" aria-modal="true" aria-labelledby="pathModalTitle">
             <div class="modal-content">
@@ -403,6 +434,6 @@
     </script>
     <script src="app.js"></script>
     <!-- Enhanced features - Phase 1 -->
-    <script src="app_enhanced.js"></script>
+    <!-- <script src="app_enhanced.js"></script> -->
 </body>
 </html>

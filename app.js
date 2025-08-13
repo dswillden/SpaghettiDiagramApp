@@ -23,6 +23,10 @@ class SpaghettiDiagramApp {
         this.currentObstacle = null;
         this.currentZone = null;
         this.tempPathPoints = null;
+    // Path editing / color cycle
+    this.editingPath = null;
+    this._pathColors = ['#ff1744','#2979ff','#00c853','#ff9100','#8e24aa','#00bfa5','#d500f9','#c0ca33'];
+    this._pathColorIndex = 0;
         
         // Flag to ensure we only apply the deferred initial reset once
         // this._initialViewApplied = false; // Removed _initialViewApplied flag (no longer needed)
@@ -105,6 +109,7 @@ class SpaghettiDiagramApp {
         this.setTool('select');
         
         this.initAutoPathUI();
+    this.initPathSidePanel();
     }
     
     setLoading(isLoading, message) {
@@ -171,6 +176,31 @@ class SpaghettiDiagramApp {
         this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
         this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
         this.canvas.addEventListener('dblclick', this.handleDoubleClick.bind(this));
+        // Stop drawing if mouse leaves canvas while drawing a path
+        this.canvas.addEventListener('mouseleave', (e) => {
+            if (this.currentTool === 'path' && this.isDrawing) {
+                if (this.currentPath.length > 1) {
+                    this.finalizePath(); // This will set isDrawing = false
+                } else {
+                    this.currentPath = [];
+                    this.render();
+                    this.isDrawing = false; // Only set here if we're not calling finalizePath
+                }
+            }
+        });
+        // Global mouseup to catch releases outside canvas (prevents path sticking to cursor)
+        window.addEventListener('mouseup', (e) => {
+            if (this.currentTool === 'path' && this.isDrawing) {
+                if (this.currentPath.length > 1) {
+                    this.finalizePath();
+                } else {
+                    this.currentPath = [];
+                    this.render();
+                    this.isDrawing = false;
+                }
+                this.isDragging = false;
+            }
+        });
         
         // Prevent context menu on canvas
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -885,6 +915,22 @@ class SpaghettiDiagramApp {
     }
     
     handlePathMouseDown() {
+        // If side panel is open with an editingPath, auto-save current values then close
+        if (this._pathPanelEl && !this._pathPanelEl.classList.contains('hidden') && this.editingPath) {
+            try {
+                const d = (this._pathPanelDesc?.value || '').trim();
+                const f = Math.max(1, parseInt(this._pathPanelFreq?.value)||1);
+                const c = this._pathPanelColor?.value || this.editingPath.color;
+                if (d) this.editingPath.description = d;
+                this.editingPath.frequency = f;
+                this.editingPath.color = c;
+                this.editingPath.length = this.calculatePathLength(this.editingPath.points);
+                this.updateAnalytics();
+            } catch(_) {}
+            // Close panel silently
+            this._pathPanelEl.classList.add('hidden');
+            this.editingPath = null;
+        }
         this.isDrawing = true;
         this.currentPath = [{ ...this.mousePos }];
     }
@@ -984,7 +1030,7 @@ class SpaghettiDiagramApp {
         if (this.currentTool === 'select') {
             this.handleSelectMouseMove();
         } else if (this.currentTool === 'path' && this.isDrawing) {
-            this.handlePathMouseMove();
+            this.handlePathMouseMove(e);
         } else if (this.currentTool === 'zone' && this.isDrawing) {
             this.handleZoneMouseMove();
         } else if (this.currentTool === 'obstacle' && this.isDrawing) {
@@ -1019,7 +1065,12 @@ class SpaghettiDiagramApp {
         }
     }
 
-    handlePathMouseMove() {
+    handlePathMouseMove(e) {
+        // Do not finalize here; wait for mouseup so side panel logic runs consistently
+        if (e && e.buttons === 0) {
+            // Just ignore movement with no button; mouseup handler will finalize
+            return;
+        }
         if (this.currentPath.length > 0) {
             // Add point if moved enough distance
             const lastPoint = this.currentPath[this.currentPath.length - 1];
@@ -1076,7 +1127,10 @@ class SpaghettiDiagramApp {
             this.finalizeObstacle();
         }
         
-        this.isDrawing = false;
+        // Only reset drawing state for non-path tools (path handles this in finalizePath)
+        if (this.currentTool !== 'path') {
+            this.isDrawing = false;
+        }
         this.isDragging = false;
         this.isResizing = false;
         this.isDraggingEndpoint = false;
@@ -1094,6 +1148,9 @@ class SpaghettiDiagramApp {
         e.preventDefault();
         if (this.currentTool === 'select') {
             const worldPos = this.getMousePos(e);
+            // Allow double-click path to edit
+            const p = this.getPathAt(worldPos);
+            if (p) { this.openPathEditModal(p); return; }
             const obj = this.getObjectAt(worldPos);
             if (obj) { this.selectedObject = obj; this.selectedZone = null; this.selectedObstacle = null; this.openObjectModal(); return; }
             const z = this.getZoneAt(worldPos);
@@ -1102,28 +1159,65 @@ class SpaghettiDiagramApp {
             if (ob) { this.selectedObstacle = ob; /* could open future obstacle modal */ return; }
         }
     }
+
+    openPathEditModal(path) {
+        this.editingPath = path;
+        this.tempPathPoints = null; // ensure creation buffer not used
+    this.openPathSidePanel(path);
+    }
     
     finalizePath() {
-        console.log('[PATH][finalizePath] invoked. currentPath length:', this.currentPath.length, 'isDrawing:', this.isDrawing);
-        if (this.currentPath.length < 2) {
-            console.warn('[PATH][finalizePath] Aborting: fewer than 2 points.');
-            this.currentPath = [];
-            this.render();
+        // Prevent multiple calls by checking if we're actually drawing
+        if (!this.isDrawing) {
+            console.log('[PATH][finalizePath] skipped - not drawing');
             return;
         }
-        const beforeSimplify = this.currentPath.length;
-        // Simplify path to reduce point count
-        const simplified = this.simplifyPath(this.currentPath);
-        console.log('[PATH][finalizePath] Simplified from', beforeSimplify, 'to', simplified.length, 'points');
-        if (simplified.length >= 2) {
-            this.tempPathPoints = simplified;
-            console.log('[PATH][finalizePath] tempPathPoints set. Length:', this.tempPathPoints.length);
-            this.openPathModal();
-        } else {
-            console.warn('[PATH][finalizePath] Simplified path invalid (<2 points).');
+        console.log('[PATH][finalizePath] starting finalization...');
+        this.isDrawing = false; // Set early to prevent multiple calls
+        
+        console.log('[PATH][finalizePath] instant create attempt length:', this.currentPath.length);
+        if (this.currentPath.length < 2) { 
+            console.log('[PATH][finalizePath] path too short, clearing');
+            this.currentPath = []; 
+            this.render(); 
+            return; 
         }
-        this.currentPath = [];
-        this.render();
+        const simplified = this.simplifyPath(this.currentPath);
+        if (!simplified || simplified.length < 2) { 
+            console.log('[PATH][finalizePath] simplified path too short, clearing');
+            this.currentPath = []; 
+            this.render(); 
+            return; 
+        }
+        // Attach endpoints to nearest object (radius)
+        const attachRadius = 30;
+        const findAttachment = (pt) => {
+            let best=null, bestDist=attachRadius;
+            for (const obj of this.objects) {
+                const cx=obj.x+obj.width/2, cy=obj.y+obj.height/2;
+                const d=Math.hypot(pt.x-cx, pt.y-cy);
+                if (d<bestDist){ bestDist=d; best=obj; }
+            }
+            return best;
+        };
+        const first = { ...simplified[0] }; const last = { ...simplified[simplified.length-1] };
+        const startObj = findAttachment(first); const endObj = findAttachment(last);
+        if (startObj){ first.x = startObj.x + startObj.width/2; first.y = startObj.y + startObj.height/2; }
+        if (endObj){ last.x = endObj.x + endObj.width/2; last.y = endObj.y + endObj.height/2; }
+        simplified[0]=first; simplified[simplified.length-1]=last;
+        const color = this._pathColors[this._pathColorIndex % this._pathColors.length];
+        this._pathColorIndex++;
+        const path = { id: Date.now()+Math.random(), points: simplified, description: `Path ${this.paths.length+1}`, frequency: 1, color, startObjectId: startObj?startObj.id:null, endObjectId: endObj?endObj.id:null, length: this.calculatePathLength(simplified) };
+        console.log('[PATH][finalizePath] created path:', path.id);
+        this.paths.push(path);
+        this.updateObjectVisits(path);
+        this.updateAnalytics();
+        this.showInfoMessage(`Added ${path.description}`, 'success', 1500);
+        this.currentPath = []; // Clear current path immediately
+        console.log('[PATH][finalizePath] calling openPathSidePanel...');
+        this.openPathSidePanel(path);
+        this.render(); // Render after clearing current path and opening panel
+        console.log('[PATH][finalizePath] finalization complete');
     }
     
     finalizeObstacle() {
@@ -1244,6 +1338,7 @@ class SpaghettiDiagramApp {
         document.getElementById('pathModal').classList.add('hidden');
         document.getElementById('pathForm').reset();
         this.tempPathPoints = null;
+    this.editingPath = null;
         // Restore marker cursor if still in path tool
         if (this.currentTool === 'path') {
             this.canvas.style.cursor = '';
@@ -1255,63 +1350,46 @@ class SpaghettiDiagramApp {
         e.preventDefault();
     // Mark as handled so capture fallback does not double-run
     this._primaryPathSubmitHandled = true;
-        if (!this.tempPathPoints || this.tempPathPoints.length < 2) {
-            console.error('[PATH][savePathMetadata] Invalid tempPathPoints. Value:', this.tempPathPoints);
-            alert('Invalid path data. (Debug: No points)');
-            return;
-        }
         const descriptionEl = document.getElementById('pathDescription');
         const frequencyEl = document.getElementById('pathFrequency');
         const colorEl = document.getElementById('pathColor');
         const description = descriptionEl.value.trim();
         const frequency = parseInt(frequencyEl.value);
         const color = colorEl.value;
-        console.log('[PATH][savePathMetadata] Collected form data:', { description, frequency, color, points: this.tempPathPoints.length });
+        console.log('[PATH][savePathMetadata] Collected form data:', { description, frequency, color });
         if (!description || frequency < 1 || Number.isNaN(frequency)) {
             console.warn('[PATH][savePathMetadata] Validation failed.', { description, frequency });
             alert('Please fill in all required fields.');
             return;
         }
-        // Determine attachments (snap endpoints to nearest object center if within threshold)
-        const attachRadius = 30; // px
-        const findAttachment = (pt) => {
-            let best = null; let bestDist = attachRadius;
-            for (const obj of this.objects) {
-                const cx = obj.x + obj.width/2; const cy = obj.y + obj.height/2;
-                const d = Math.hypot(pt.x-cx, pt.y-cy);
-                if (d < bestDist) { bestDist = d; best = obj; }
-            }
-            return best;
-        };
-        const startPt = this.tempPathPoints[0];
-        const endPt = this.tempPathPoints[this.tempPathPoints.length-1];
-        const startObj = findAttachment(startPt);
-        const endObj = findAttachment(endPt);
-        if (startObj) { startPt.x = startObj.x + startObj.width/2; startPt.y = startObj.y + startObj.height/2; }
-        if (endObj) { endPt.x = endObj.x + endObj.width/2; endPt.y = endObj.y + endObj.height/2; }
-        const path = {
-            id: Date.now() + Math.random(),
-            points: [...this.tempPathPoints],
-            description,
-            frequency,
-            color,
-            startObjectId: startObj ? startObj.id : null,
-            endObjectId: endObj ? endObj.id : null,
-            length: this.calculatePathLength(this.tempPathPoints)
-        };
-        console.log('[PATH][savePathMetadata] Adding path object:', path);
-        this.paths.push(path);
-        console.log('[PATH][savePathMetadata] Paths total now:', this.paths.length);
-    // Remember last frequency for convenience
-    this._lastPathFrequency = frequency;
-        this.updateObjectVisits(path);
-        this.updateAnalytics();
+        if (this.editingPath) {
+            this.editingPath.description = description;
+            this.editingPath.frequency = frequency;
+            this.editingPath.color = color;
+            this.editingPath.length = this.calculatePathLength(this.editingPath.points);
+            this._lastPathFrequency = frequency;
+            this.updateAnalytics();
+        } else {
+            // Fallback: create new path from temp buffer if present (legacy flow)
+            if (!this.tempPathPoints || this.tempPathPoints.length < 2) { alert('No path to save. Draw a path first.'); return; }
+            const attachRadius = 30;
+            const findAttachment = (pt) => { let best=null,bestDist=attachRadius; for (const obj of this.objects){ const cx=obj.x+obj.width/2, cy=obj.y+obj.height/2; const d=Math.hypot(pt.x-cx, pt.y-cy); if(d<bestDist){bestDist=d;best=obj;} } return best; };
+            const startPt=this.tempPathPoints[0], endPt=this.tempPathPoints[this.tempPathPoints.length-1];
+            const startObj=findAttachment(startPt), endObj=findAttachment(endPt);
+            if(startObj){ startPt.x=startObj.x+startObj.width/2; startPt.y=startObj.y+startObj.height/2; }
+            if(endObj){ endPt.x=endObj.x+endObj.width/2; endPt.y=endObj.y+endObj.height/2; }
+            const path={ id:Date.now()+Math.random(), points:[...this.tempPathPoints], description, frequency, color, startObjectId:startObj?startObj.id:null, endObjectId:endObj?endObj.id:null, length:this.calculatePathLength(this.tempPathPoints) };
+            this.paths.push(path);
+            this._lastPathFrequency = frequency;
+            this.updateObjectVisits(path);
+            this.updateAnalytics();
+        }
         this.closePathModal();
         this.render();
         // Show success feedback
         const info = document.getElementById('canvasInfo');
         const originalText = info.textContent;
-        info.textContent = `Path "${description}" added successfully!`;
+        info.textContent = `Path "${description}" saved!`;
         info.style.color = 'var(--color-success)';
         setTimeout(() => {
             info.textContent = originalText;
@@ -1807,6 +1885,84 @@ class SpaghettiDiagramApp {
     calculatePathLength(points){ if (!points||points.length<2) return 0; let d=0; for (let i=1;i<points.length;i++){ const a=points[i-1], b=points[i]; d+=Math.hypot(b.x-a.x,b.y-a.y); } return d; }
     updateObjectVisits(path){ if (!path||!path.points||path.points.length<2) return; const start=path.points[0], end=path.points[path.points.length-1]; const inc=(pt)=>{ const obj=this.getObjectAt(pt); if (obj) obj.visits=(obj.visits||0)+ (path.frequency||1); }; inc(start); inc(end); }
 
+    // Line intersection function for analytics
+    lineIntersectsLine(p1, p2, p3, p4) {
+        const denom = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+        if (Math.abs(denom) < 1e-10) return false; // Lines are parallel
+        
+        const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denom;
+        const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denom;
+        
+        return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+    }
+
+    // Path crossings counter for analytics
+    countPathCrossings(path1, path2) {
+        let crossings = 0;
+        for (let i = 0; i < path1.points.length - 1; i++) {
+            for (let j = 0; j < path2.points.length - 1; j++) {
+                if (this.lineIntersectsLine(
+                    path1.points[i],
+                    path1.points[i + 1],
+                    path2.points[j],
+                    path2.points[j + 1]
+                )) {
+                    crossings++;
+                }
+            }
+        }
+        return crossings;
+    }
+
+    // Spaghetti index calculation for analytics
+    calculateSpaghettiIndex() {
+        let totalTurns = 0;
+        let crossings = 0;
+        
+        for (let i = 0; i < this.paths.length; i++) {
+            const path1 = this.paths[i];
+            
+            // Count turns
+            for (let j = 1; j < path1.points.length - 1; j++) {
+                const angle = this.calculateAngle(
+                    path1.points[j - 1],
+                    path1.points[j],
+                    path1.points[j + 1]
+                );
+                if (Math.abs(angle) > 30) {
+                    totalTurns++;
+                }
+            }
+            
+            // Count crossings with other paths
+            for (let k = i + 1; k < this.paths.length; k++) {
+                const path2 = this.paths[k];
+                crossings += this.countPathCrossings(path1, path2);
+            }
+        }
+        
+        const pathCount = this.paths.length || 1;
+        return Math.min(100, Math.round(
+            (totalTurns / pathCount * 5) + (crossings / pathCount * 10)
+        ));
+    }
+
+    // Angle calculation helper for analytics
+    calculateAngle(p1, p2, p3) {
+        const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
+        const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+        
+        const angle1 = Math.atan2(v1.y, v1.x);
+        const angle2 = Math.atan2(v2.y, v2.x);
+        
+        let angle = (angle2 - angle1) * 180 / Math.PI;
+        
+        while (angle > 180) angle -= 360;
+        while (angle < -180) angle += 360;
+        
+        return angle;
+    }
+
     updateAnalytics(){ // basic metrics; enhanced file adds more
         const totalPathsEl=document.getElementById('totalPaths');
         const totalDistEl=document.getElementById('totalDistance');
@@ -1815,8 +1971,18 @@ class SpaghettiDiagramApp {
         const stepsEl=document.getElementById('totalSteps');
         const avgLenEl=document.getElementById('avgPathLength');
         const weightedEl=document.getElementById('weightedCost');
-        let total=0, weighted=0; for (const p of this.paths){ const len=p.length || this.calculatePathLength(p.points); p.length=len; total+=len*(p.frequency||1); weighted+=len*(p.frequency||1); }
-        const rawTotal=total; const avg = this.paths.length? (rawTotal/this.paths.length):0;
+        const spaghettiIndexEl=document.getElementById('spaghettiIndex');
+        
+        let total=0, weighted=0; 
+        for (const p of this.paths){ 
+            const len=p.length || this.calculatePathLength(p.points); 
+            p.length=len; 
+            total+=len*(p.frequency||1); 
+            weighted+=len*(p.frequency||1); 
+        }
+        const rawTotal=total; 
+        const avg = this.paths.length? (rawTotal/this.paths.length):0;
+        
         if (totalPathsEl) totalPathsEl.textContent=this.paths.length;
         if (totalDistEl) totalDistEl.textContent=`${rawTotal.toFixed(1)} px`;
         if (unitsLabel) unitsLabel.textContent=`Total Distance (${this.units})`;
@@ -1824,10 +1990,86 @@ class SpaghettiDiagramApp {
         if (stepsEl) { const unitsDist = (this.unitsPerPixel>0)? (rawTotal*this.unitsPerPixel):0; const steps = unitsDist * (this.stepsPerUnit||0); stepsEl.textContent = steps? steps.toFixed(1):'0'; }
         if (avgLenEl) avgLenEl.textContent = `${avg.toFixed(1)} px`;
         if (weightedEl) weightedEl.textContent = weighted.toFixed(1);
+        
+        // Calculate spaghetti index
+        if (spaghettiIndexEl) {
+            const index = this.calculateSpaghettiIndex();
+            spaghettiIndexEl.textContent = index;
+            
+            // Color code based on complexity
+            if (index < 20) {
+                spaghettiIndexEl.style.color = 'var(--color-success, #2e7d32)';
+            } else if (index < 50) {
+                spaghettiIndexEl.style.color = 'var(--color-warning, #ed6c02)';
+            } else {
+                spaghettiIndexEl.style.color = 'var(--color-error, #d32f2f)';
+            }
+        }
+        
         this.refreshHotspots();
     }
 
     refreshHotspots(){ const list=document.getElementById('hotspotList'); if (!list) return; const visits = this.objects.map(o=>({name:o.name, v:o.visits||0})).filter(o=>o.v>0).sort((a,b)=>b.v-a.v).slice(0,6); list.innerHTML=''; if (!visits.length){ list.innerHTML='<div class="empty-state">No paths drawn yet</div>'; return;} visits.forEach(v=>{ const div=document.createElement('div'); div.className='hotspot-item'; div.textContent=`${v.name}: ${v.v}`; list.appendChild(div); }); }
+
+    // ---- Path Side Panel (inline path metadata editor) ----
+    initPathSidePanel(){
+        console.log('[INIT] Initializing path side panel...');
+        this._pathPanelEl = document.getElementById('pathSidePanel');
+        this._pathPanelDesc = document.getElementById('pathPanelDescription');
+        this._pathPanelFreq = document.getElementById('pathPanelFrequency');
+        this._pathPanelColor = document.getElementById('pathPanelColor');
+        this._pathPanelForm = document.getElementById('pathPanelForm');
+        
+        console.log('[INIT] Panel elements found:', {
+            panel: !!this._pathPanelEl,
+            desc: !!this._pathPanelDesc,
+            freq: !!this._pathPanelFreq,
+            color: !!this._pathPanelColor,
+            form: !!this._pathPanelForm
+        });
+        
+        const closeBtn = document.getElementById('pathPanelClose');
+        const closeFooter = document.getElementById('pathPanelCloseFooter');
+        const saveBtn = document.getElementById('pathPanelSave');
+        const closePanel = () => { if (this._pathPanelEl) this._pathPanelEl.classList.add('hidden'); this.editingPath=null; };
+        if (closeBtn) closeBtn.addEventListener('click', closePanel);
+        if (closeFooter) closeFooter.addEventListener('click', closePanel);
+        if (this._pathPanelForm){
+            this._pathPanelForm.addEventListener('submit',(e)=>{
+                e.preventDefault();
+                if (!this.editingPath) { closePanel(); return; }
+                const d=(this._pathPanelDesc.value||'').trim();
+                const f=Math.max(1, parseInt(this._pathPanelFreq.value)||1);
+                const c=this._pathPanelColor.value || this.editingPath.color;
+                if (d) this.editingPath.description=d; else this.editingPath.description = this.editingPath.description || `Path`;
+                this.editingPath.frequency=f;
+                this.editingPath.color=c;
+                this.editingPath.length = this.calculatePathLength(this.editingPath.points);
+                this.updateAnalytics();
+                this.render();
+                this.showInfoMessage('Path updated','success',1200);
+                closePanel();
+            });
+        }
+        document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && this._pathPanelEl && !this._pathPanelEl.classList.contains('hidden')) closePanel(); });
+    }
+    openPathSidePanel(path){
+        console.log('[PANEL] openPathSidePanel called with path:', path ? path.id : 'null');
+        console.log('[PANEL] _pathPanelEl exists:', !!this._pathPanelEl);
+        if (!this._pathPanelEl) {
+            console.log('[PANEL] No panel element found!');
+            return; 
+        }
+        this.editingPath=path; 
+        console.log('[PANEL] Removing hidden class...');
+        this._pathPanelEl.classList.remove('hidden');
+        console.log('[PANEL] Panel should now be visible');
+        if (this._pathPanelDesc) this._pathPanelDesc.value = path.description || `Path ${this.paths.indexOf(path)+1}`;
+        if (this._pathPanelFreq) this._pathPanelFreq.value = path.frequency || 1;
+        if (this._pathPanelColor) this._pathPanelColor.value = path.color || '#ff0000';
+        if (this._pathPanelDesc) this._pathPanelDesc.focus();
+        console.log('[PANEL] Panel setup complete');
+    }
 
     // ---- Scale & Calibration (simplified) ----
     loadScaleFromStorage(){ try{ const s=JSON.parse(localStorage.getItem('sdScale')||'null'); if (s){ this.units=s.units||this.units; this.unitsPerPixel=s.unitsPerPixel||0; this.stepsPerUnit=s.stepsPerUnit||0; this.gridCellUnits=s.gridCellUnits||1; } }catch(_){} }

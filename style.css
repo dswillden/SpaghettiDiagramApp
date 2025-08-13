@@ -1215,6 +1215,36 @@ select.form-control {
 /* Toast Notifications */
 #toastContainer .toast { display: block; }
 
+/* Path Side Panel */
+.path-side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 320px;
+  max-width: 80vw;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -4px 0 12px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+  z-index: 1500;
+  transform: translateX(0);
+  animation: panelSlideIn .28s var(--ease-standard);
+}
+.path-side-panel.hidden { display:none; }
+@keyframes panelSlideIn { from { transform: translateX(40px); opacity:0;} to { transform:translateX(0); opacity:1;} }
+.path-panel-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--color-border); }
+.path-panel-title { font-size:16px; margin:0; }
+.panel-close-btn { background:none; border:none; font-size:22px; cursor:pointer; color:var(--color-text-secondary); width:32px; height:32px; border-radius:8px; }
+.panel-close-btn:hover { background: var(--color-secondary); color: var(--color-text); }
+.path-panel-body { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; }
+.path-panel-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+
+@media (max-width: 640px) {
+  .path-side-panel { width: 100%; max-width:none; }
+}
+
 /* Responsive Design */
 @media (max-width: 1024px) {
   .sidebar {
