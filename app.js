@@ -478,8 +478,10 @@ class SpaghettiDiagramApp {
         }
         
         // Update canvas cursor class and container class for delete mode
-        this.canvas.className = '';
-        this.canvas.classList.add(`${tool}-mode`);
+    this.canvas.className = '';
+    this.canvas.classList.add(`${tool}-mode`);
+    // Clear any previously set inline cursor so CSS class cursor applies (needed for custom path cursor)
+    this.canvas.style.cursor = '';
         
         const canvasContainer = document.querySelector('.canvas-container');
         canvasContainer.classList.remove('delete-mode');
