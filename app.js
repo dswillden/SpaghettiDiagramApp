@@ -1541,6 +1541,46 @@ class SpaghettiDiagramApp {
         // Grid
         this.drawGrid(ctx);
 
+        // Calibration provisional / finalized measurement line
+        if ((this.isCalibrating && this.calibrationPoints.length > 0) || (this.calibrationPoints.length === 2 && this._pendingCalibrationPx)) {
+            const pts = this.calibrationPoints;
+            const a = pts[0];
+            // While actively calibrating and only one point chosen, extend line to current mouse position
+            const b = (this.isCalibrating && pts.length === 1) ? this.mousePos : (pts[1] || this.mousePos);
+            if (a && b) {
+                ctx.save();
+                ctx.strokeStyle = '#ff9800';
+                ctx.fillStyle = '#ff9800';
+                ctx.lineWidth = 2 / (this.zoom || 1); // keep roughly constant screen thickness
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+                // Endpoints
+                const r = 5 / (this.zoom || 1);
+                ctx.beginPath(); ctx.arc(a.x, a.y, r, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI*2); ctx.fill();
+                // Length label (pixels)
+                const dx = b.x - a.x; const dy = b.y - a.y; const dist = Math.hypot(dx, dy);
+                const midX = a.x + dx/2; const midY = a.y + dy/2;
+                ctx.save();
+                ctx.translate(midX, midY);
+                // Background box for readability
+                const label = `${dist.toFixed(1)} px`;
+                ctx.font = `${12 / (this.zoom || 1)}px sans-serif`;
+                const metrics = ctx.measureText(label);
+                const pad = 4 / (this.zoom || 1);
+                const w = metrics.width + pad*2; const h = (12 / (this.zoom || 1)) + pad*2;
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(-w/2, -h/2, w, h);
+                ctx.fillStyle = '#fff';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(label, 0, 0);
+                ctx.restore();
+                ctx.restore();
+            }
+        }
+
         // Zones
         for (const z of this.zones) this.drawZone(ctx, z);
         // Obstacles
