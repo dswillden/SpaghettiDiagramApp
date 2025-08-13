@@ -1201,6 +1201,40 @@ class SpaghettiDiagramApp {
             freqEl.value = this._lastPathFrequency || 1;
         }
         if (desc) desc.focus();
+        // Reset submit handled flag for this opening
+        this._primaryPathSubmitHandled = false;
+        // Ensure Save button operational
+        const saveBtn = document.getElementById('savePath');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.removeAttribute('aria-disabled');
+            const clickHandler = (ev) => {
+                console.log('[PATH][saveBtnClick] Save button clicked');
+                const form = document.getElementById('pathForm');
+                if (form) {
+                    form.requestSubmit();
+                } else {
+                    console.warn('[PATH][saveBtnClick] pathForm not found');
+                }
+            };
+            if (saveBtn.__sdClick) saveBtn.removeEventListener('click', saveBtn.__sdClick);
+            saveBtn.addEventListener('click', clickHandler);
+            saveBtn.__sdClick = clickHandler;
+        }
+        // Global capture fallback (bind once)
+        if (!this.__pathFormCaptureBound) {
+            document.addEventListener('submit', (ev) => {
+                const form = ev.target;
+                if (form && form.id === 'pathForm') {
+                    console.log('[PATH][captureSubmit] submit event captured. primaryHandled?', this._primaryPathSubmitHandled);
+                    if (!this._primaryPathSubmitHandled) {
+                        // call primary now
+                        this.savePathMetadata(ev);
+                    }
+                }
+            }, true);
+            this.__pathFormCaptureBound = true;
+        }
         // Ensure form fields are blank each time except color default
         // (form.reset may already have happened on prior close)
     }
@@ -1219,6 +1253,8 @@ class SpaghettiDiagramApp {
     savePathMetadata(e) {
         console.log('[PATH][savePathMetadata] Submit handler entered.');
         e.preventDefault();
+    // Mark as handled so capture fallback does not double-run
+    this._primaryPathSubmitHandled = true;
         if (!this.tempPathPoints || this.tempPathPoints.length < 2) {
             console.error('[PATH][savePathMetadata] Invalid tempPathPoints. Value:', this.tempPathPoints);
             alert('Invalid path data. (Debug: No points)');
